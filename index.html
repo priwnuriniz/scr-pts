@@ -1,5 +1,5 @@
--- STRXcahts Ultimate Menu v10
--- Stable + Aesthetic + Fixed Kick + Spin + No Emoji
+-- STRXcahts Ultimate Menu v11
+-- ESP Fix, Aimbot Stable, Fly Fixed, Spin Added, No Kick, No Emoji
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -31,13 +31,15 @@ local rgbHue = 0
 local showFps = true
 local showNotifs = true
 
+-- ESP
 local espEnabled = false
 local espVisibleColor = Color3.fromRGB(0, 255, 100)
 local espHiddenColor = Color3.fromRGB(255, 60, 60)
 local espShowName, espShowHealth, espShowDistance = true, true, true
-local espMaxDistance = 800
+local espMaxDistance = 1000
 local espData = {}
 
+-- Aimbot
 local aimbotEnabled = false
 local aimbotFOV = 120
 local aimbotSmoothness = 6
@@ -46,13 +48,16 @@ local aimbotAimPart = "Head"
 local aimbotTarget, aimbotLockTime = nil, 0
 local AIMBOT_RETENTION = 0.35
 
+-- Silent Aim
 local silentAimEnabled = false
 local silentAimFOV = 150
 local silentAimTeamCheck = false
 local silentAimWallCheck = false
 local silentAimTargetPart = "Head"
 local silentAimHitChance = 100
+local silentAimOldIndex = nil
 
+-- Troll / TP
 local frozenEnabled, ragdollEnabled = false, false
 local frozenAnchors = {}
 local savedPosition = nil
@@ -61,7 +66,7 @@ local selectedPlayer = nil
 local origLighting = {}
 local origJumpPower, origUseJumpPower = nil, nil
 
--- Physics handles
+-- Physics
 local flyBV, flyBG, flyConn
 local noclipConn
 local spinAV
@@ -80,7 +85,6 @@ local keybinds = {
 }
 local listeningForBind = nil
 local keybindButtons = {}
-local toggleButtons = {}
 
 -- ==== HELPERS ====
 local function getRGBColor()
@@ -97,15 +101,7 @@ local function safeCharacter()
     return char, hrp, hum
 end
 
-local function pcallLog(name, fn, ...)
-    local ok, err = pcall(fn, ...)
-    if not ok then
-        warn("[STRXcahts] " .. name .. " hatası: " .. tostring(err))
-    end
-    return ok
-end
-
--- ==== FLY (BodyVelocity - stabil) ====
+-- ==== FLY ====
 local function startFly()
     local _, hrp = safeCharacter()
     if not hrp then return end
@@ -138,12 +134,8 @@ local function startFly()
             if UserInputService:IsKeyDown(Enum.KeyCode.E) then dir += Vector3.yAxis end
             if UserInputService:IsKeyDown(Enum.KeyCode.Q) then dir -= Vector3.yAxis end
         end)
-        if flyBV then
-            flyBV.Velocity = dir.Magnitude > 0 and dir.Unit * flySpeed or Vector3.zero
-        end
-        if flyBG then
-            flyBG.CFrame = CFrame.new(r.Position, r.Position + Camera.CFrame.LookVector)
-        end
+        if flyBV then flyBV.Velocity = dir.Magnitude > 0 and dir.Unit * flySpeed or Vector3.zero end
+        if flyBG then flyBG.CFrame = CFrame.new(r.Position, r.Position + Camera.CFrame.LookVector) end
     end)
 end
 
@@ -183,12 +175,8 @@ local function toggleSpin(state)
     if not hrp then return end
     if spinAV then spinAV:Destroy() spinAV = nil end
     if spinEnabled then
-        local att = hrp:FindFirstChild("SpinAtt")
-        if not att then
-            att = Instance.new("Attachment")
-            att.Name = "SpinAtt"
-            att.Parent = hrp
-        end
+        local att = hrp:FindFirstChild("SpinAtt") or Instance.new("Attachment", hrp)
+        att.Name = "SpinAtt"
         spinAV = Instance.new("AngularVelocity")
         spinAV.Attachment0 = att
         spinAV.MaxTorque = math.huge
@@ -213,7 +201,7 @@ local function toggleNoclip(state)
     end
 end
 
--- ==== INFINITE JUMP ====
+-- ==== INFINITE JUMP / ANTI-AFK / FULLBRIGHT ====
 UserInputService.JumpRequest:Connect(function()
     if infiniteJumpEnabled then
         local _, _, hum = safeCharacter()
@@ -221,7 +209,6 @@ UserInputService.JumpRequest:Connect(function()
     end
 end)
 
--- ==== ANTI-AFK ====
 LocalPlayer.Idled:Connect(function()
     if antiAfkEnabled then
         pcall(function()
@@ -231,7 +218,6 @@ LocalPlayer.Idled:Connect(function()
     end
 end)
 
--- ==== FULLBRIGHT ====
 local function toggleFullbright(state)
     fullbrightEnabled = state
     if state then
@@ -251,7 +237,7 @@ local function toggleFullbright(state)
     end
 end
 
--- ==== ESP ====
+-- ==== ESP (TAMAMEN YENİLENDİ) ====
 local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
@@ -271,10 +257,13 @@ local function createESPFor(player)
     if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
+
     if espData[player] then
         if espData[player].highlight then espData[player].highlight:Destroy() end
         if espData[player].billboard then espData[player].billboard:Destroy() end
     end
+
+    -- Highlight (Karakter Kutusu)
     local hl = Instance.new("Highlight")
     hl.FillColor = espVisibleColor
     hl.OutlineColor = espVisibleColor
@@ -283,42 +272,63 @@ local function createESPFor(player)
     hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     hl.Adornee = char
     hl.Parent = char
+
+    -- Billboard (Yazılar ve Can Barı)
     local head = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
-    if not head then
-        espData[player] = {highlight = hl}
-        return
-    end
+    if not head then return end
+
     local bb = Instance.new("BillboardGui")
-    bb.Size = UDim2.new(0, 220, 0, 60)
-    bb.StudsOffset = Vector3.new(0, 2.8, 0)
+    bb.Name = "STRX_ESP"
+    bb.Size = UDim2.new(0, 200, 0, 50)
+    bb.StudsOffset = Vector3.new(0, 2.5, 0)
     bb.AlwaysOnTop = true
     bb.Adornee = head
     bb.Parent = head
+
+    -- İsim
     local nameLbl = Instance.new("TextLabel", bb)
-    nameLbl.Size = UDim2.new(1, 0, 0.35, 0)
+    nameLbl.Size = UDim2.new(1, 0, 0, 16)
+    nameLbl.Position = UDim2.new(0, 0, 0, 0)
     nameLbl.BackgroundTransparency = 1
     nameLbl.Text = player.Name
-    nameLbl.TextColor3 = Color3.new(1,1,1)
+    nameLbl.TextColor3 = Color3.new(1, 1, 1)
     nameLbl.Font = Enum.Font.GothamBold
     nameLbl.TextSize = 14
-    nameLbl.TextStrokeTransparency = 0.3
-    local hpLbl = Instance.new("TextLabel", bb)
-    hpLbl.Size = UDim2.new(1, 0, 0.3, 0)
-    hpLbl.Position = UDim2.new(0, 0, 0.35, 0)
-    hpLbl.BackgroundTransparency = 1
-    hpLbl.TextColor3 = Color3.fromRGB(0, 255, 100)
-    hpLbl.Font = Enum.Font.Gotham
-    hpLbl.TextSize = 12
-    hpLbl.TextStrokeTransparency = 0.3
+    nameLbl.TextStrokeTransparency = 0.5
+
+    -- Mesafe (Format düzeltildi)
     local distLbl = Instance.new("TextLabel", bb)
-    distLbl.Size = UDim2.new(1, 0, 0.3, 0)
-    distLbl.Position = UDim2.new(0, 0, 0.65, 0)
+    distLbl.Size = UDim2.new(1, 0, 0, 14)
+    distLbl.Position = UDim2.new(0, 0, 0, 16)
     distLbl.BackgroundTransparency = 1
     distLbl.TextColor3 = Color3.fromRGB(255, 200, 0)
     distLbl.Font = Enum.Font.Gotham
     distLbl.TextSize = 12
-    distLbl.TextStrokeTransparency = 0.3
-    espData[player] = {highlight = hl, billboard = bb, nameLabel = nameLbl, hpLabel = hpLbl, distLabel = distLbl}
+    distLbl.Text = "[0m]"
+    distLbl.TextStrokeTransparency = 0.5
+
+    -- Can Barı Arka Plan
+    local hpBg = Instance.new("Frame", bb)
+    hpBg.Size = UDim2.new(0.8, 0, 0, 6)
+    hpBg.Position = UDim2.new(0.1, 0, 0, 32)
+    hpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    hpBg.BorderSizePixel = 0
+    Instance.new("UICorner", hpBg).CornerRadius = UDim.new(1, 0)
+
+    -- Can Barı Dolgu
+    local hpFill = Instance.new("Frame", hpBg)
+    hpFill.Size = UDim2.new(1, 0, 1, 0)
+    hpFill.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+    hpFill.BorderSizePixel = 0
+    Instance.new("UICorner", hpFill).CornerRadius = UDim.new(1, 0)
+
+    espData[player] = {
+        highlight = hl,
+        billboard = bb,
+        nameLabel = nameLbl,
+        distLabel = distLbl,
+        hpFill = hpFill
+    }
 end
 
 local function removeESPFor(player)
@@ -348,38 +358,42 @@ local function startESP()
             local _, myPos = safeCharacter()
             if not myPos then continue end
             for player, data in pairs(espData) do
-                local ok = pcall(function()
+                pcall(function()
                     local char = player.Character
                     if not char then removeESPFor(player) return end
                     local hum = char:FindFirstChildOfClass("Humanoid")
                     if not hum or hum.Health <= 0 then return end
                     local head = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
                     if not head then return end
+                    
                     local dist = (head.Position - myPos.Position).Magnitude
                     if dist > espMaxDistance then
                         if data.highlight then data.highlight.Enabled = false end
                         if data.billboard then data.billboard.Enabled = false end
                         return
                     end
+                    
                     local visible = isPlayerVisible(char)
                     local col = visible and espVisibleColor or espHiddenColor
+                    
                     if data.highlight then
                         data.highlight.Enabled = true
                         data.highlight.FillColor = col
                         data.highlight.OutlineColor = col
                     end
+                    
                     if data.billboard then
                         data.billboard.Enabled = true
                         if data.nameLabel then data.nameLabel.Visible = espShowName; data.nameLabel.TextColor3 = col end
-                        if data.hpLabel then
-                            data.hpLabel.Visible = espShowHealth
-                            data.hpLabel.Text = string.format("%d/%d", math.floor(hum.Health), math.floor(hum.MaxHealth))
-                            local pct = hum.Health / math.max(hum.MaxHealth, 1)
-                            data.hpLabel.TextColor3 = Color3.fromRGB(math.floor(255 * (1 - pct)), math.floor(255 * pct), 80)
-                        end
-                        if data.distLabel then
+                        if data.distLabel then 
                             data.distLabel.Visible = espShowDistance
-                            data.distLabel.Text = string.format("%dm", math.floor(dist))
+                            data.distLabel.Text = "[" .. math.floor(dist) .. "m]" 
+                        end
+                        if data.hpFill then
+                            data.hpFill.Parent.Visible = espShowHealth
+                            local pct = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+                            data.hpFill.Size = UDim2.new(pct, 0, 1, 0)
+                            data.hpFill.BackgroundColor3 = Color3.fromRGB(math.floor(255 * (1 - pct)), math.floor(255 * pct), 80)
                         end
                     end
                 end)
@@ -393,7 +407,7 @@ local function stopESP()
     for p in pairs(espData) do removeESPFor(p) end
 end
 
--- ==== AIMBOT (Stabil - target retention + BindToRenderStep) ====
+-- ==== AIMBOT (Stabil) ====
 local aimRayParams = RaycastParams.new()
 aimRayParams.FilterType = Enum.RaycastFilterType.Exclude
 aimRayParams.IgnoreWater = true
@@ -453,7 +467,7 @@ pcall(function()
     RunService:BindToRenderStep("STRX_Aimbot", Enum.RenderPriority.Camera.Value + 1, aimbotUpdate)
 end)
 
--- ==== SILENT AIM (hookmetamethod ile stabil) ====
+-- ==== SILENT AIM ====
 local silentAimRayParams = RaycastParams.new()
 silentAimRayParams.FilterType = Enum.RaycastFilterType.Exclude
 silentAimRayParams.IgnoreWater = true
@@ -486,11 +500,10 @@ local function getSilentAimTarget()
     return closest
 end
 
-local silentAimOldIndex = nil
 local function startSilentAim()
     if silentAimEnabled then return end
     silentAimEnabled = true
-    local ok = pcall(function()
+    pcall(function()
         silentAimOldIndex = hookmetamethod(game, "__index", function(self, key)
             if not silentAimEnabled then return silentAimOldIndex(self, key) end
             if type(key) == "string" and (key == "Hit" or key == "Target") then
@@ -508,19 +521,14 @@ local function startSilentAim()
             return silentAimOldIndex(self, key)
         end)
     end)
-    if not ok then
-        silentAimEnabled = false
-        warn("[STRXcahts] Silent Aim hook başarısız - executor desteklemiyor olabilir")
-    end
 end
 
 local function stopSilentAim()
     silentAimEnabled = false
-    -- hookmetamethod otomatik olarak kaldırılamaz ama flag ile devre dışı
     aimbotTarget = nil
 end
 
--- ==== EMOTE (emoji yok) ====
+-- ==== EMOTE ====
 local emoteList = {
     {name = "El Salla", emote = "wave", animId = "rbxassetid://507770239"},
     {name = "Dans 1", emote = "dance", animId = "rbxassetid://507771019"},
@@ -560,7 +568,7 @@ local function playCharacterEmote(e)
     end
 end
 
--- ==== TROLL ====
+-- ==== TROLL / TELEPORT ====
 local function toggleFreeze(state)
     frozenEnabled = state
     local char = LocalPlayer.Character
@@ -584,7 +592,6 @@ local function toggleRagdoll(state)
     else hum.PlatformStand = false; hum:ChangeState(Enum.HumanoidStateType.GettingUp) end
 end
 
--- ==== TELEPORT ====
 local function teleportCharacterTo(cf)
     local char, hrp = safeCharacter()
     if not hrp then return false end
@@ -622,10 +629,9 @@ local function goBack()
 end
 
 -- =============================================
--- ==== UI ====
+-- ==== UI BAŞLANGIÇ ====
 -- =============================================
 
--- Yükleme (küçük floating kart, kararma yok)
 local LoadGui = Instance.new("ScreenGui")
 LoadGui.Name = "STRXcahtsLoading"
 LoadGui.Parent = guiParent
@@ -761,7 +767,6 @@ fpsLbl.TextSize = 12
 fpsLbl.TextXAlignment = Enum.TextXAlignment.Right
 fpsLbl.ZIndex = 3
 
--- Sekmeler (emoji yok)
 local tabNames = {"Player", "Teleport", "ESP", "Aimbot", "Silent", "Emote", "Troll", "Anti-Ban", "Ayarlar"}
 local tabs = {}
 local tabHolder = Instance.new("Frame", MainFrame)
@@ -800,7 +805,6 @@ contentStroke.Color = Color3.fromRGB(60, 60, 70)
 contentStroke.Thickness = 1
 contentStroke.Transparency = 0.6
 
--- Status footer
 local statusFooter = Instance.new("Frame", MainFrame)
 statusFooter.Size = UDim2.new(1, -30, 0, 26)
 statusFooter.Position = UDim2.new(0, 15, 1, -32)
@@ -837,7 +841,6 @@ local function updateStatus()
     end
 end
 
--- Section header
 local function makeSectionHeader(parent, text, y)
     local f = Instance.new("Frame", parent)
     f.Size = UDim2.new(0, 320, 0, 22)
@@ -862,7 +865,6 @@ local function makeSectionHeader(parent, text, y)
     line.ZIndex = 2
 end
 
--- Slider
 local function makeSlider(parent, labelText, minV, maxV, default, y, onChanged)
     local holder = Instance.new("Frame", parent)
     holder.Size = UDim2.new(0, 320, 0, 48)
@@ -925,7 +927,6 @@ local function makeSlider(parent, labelText, minV, maxV, default, y, onChanged)
     end)
 end
 
--- Toggle with keybind
 local function makeToggle(parent, text, y, callback, keybindId)
     local f = Instance.new("Frame", parent)
     f.Size = UDim2.new(0, 320, 0, 34)
@@ -946,7 +947,6 @@ local function makeToggle(parent, text, y, callback, keybindId)
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.ZIndex = 2
 
-    -- Keybind button
     local kbBtn = nil
     if keybindId then
         kbBtn = Instance.new("TextButton", f)
@@ -970,11 +970,9 @@ local function makeToggle(parent, text, y, callback, keybindId)
             kbBtn.Text = "..."
             kbBtn.BackgroundColor3 = Color3.fromRGB(180, 120, 0)
         end)
-
         keybindButtons[keybindId] = kbBtn
     end
 
-    -- ON/OFF button
     local onBtn = Instance.new("TextButton", f)
     onBtn.Size = UDim2.new(0, 44, 0, 22)
     onBtn.Position = UDim2.new(1, -54, 0.5, -11)
@@ -989,11 +987,7 @@ local function makeToggle(parent, text, y, callback, keybindId)
 
     local on = false
     local function doToggle(forceState)
-        if forceState ~= nil then
-            on = forceState
-        else
-            on = not on
-        end
+        if forceState ~= nil then on = forceState else on = not on end
         onBtn.Text = on and "ON" or "OFF"
         TweenService:Create(onBtn, TweenInfo.new(0.2), {
             BackgroundColor3 = on and Color3.fromRGB(0, 180, 90) or Color3.fromRGB(255, 140, 0)
@@ -1001,17 +995,10 @@ local function makeToggle(parent, text, y, callback, keybindId)
         callback(on)
         updateStatus()
     end
-
     onBtn.MouseButton1Click:Connect(function() doToggle() end)
-
-    if keybindId then
-        keybinds[keybindId].callback = function() doToggle() end
-    end
-
-    toggleButtons[keybindId or text] = {doToggle = doToggle}
+    if keybindId then keybinds[keybindId].callback = function() doToggle() end end
 end
 
--- Color picker
 local function makeColorPicker(parent, labelText, y, currentColor, onChanged)
     local holder = Instance.new("Frame", parent)
     holder.Size = UDim2.new(0, 320, 0, 60)
@@ -1065,7 +1052,6 @@ local function makeColorPicker(parent, labelText, y, currentColor, onChanged)
     end
 end
 
--- Button
 local function makeButton(parent, text, x, y, w, h, color, callback)
     local btn = Instance.new("TextButton", parent)
     btn.Size = UDim2.new(0, w, 0, h)
@@ -1090,7 +1076,6 @@ local function makeButton(parent, text, x, y, w, h, color, callback)
     return btn
 end
 
--- Pages
 local function makePage()
     local p = Instance.new("ScrollingFrame", content)
     p.Size = UDim2.new(1, -12, 1, -12)
@@ -1134,7 +1119,6 @@ makeSlider(playerPage, "Spin Hizi", 1, 200, spinSpeed, 472, function(v) spinSpee
 makeToggle(playerPage, "Anti-AFK", 526, function(s) antiAfkEnabled = s end)
 makeToggle(playerPage, "Fullbright", 564, function(s) toggleFullbright(s) end)
 
--- Menu key
 local menuRow = Instance.new("Frame", playerPage)
 menuRow.Size = UDim2.new(0, 320, 0, 34)
 menuRow.Position = UDim2.new(0, 8, 0, 606)
@@ -1307,16 +1291,6 @@ local function buildPlayerList()
         playerRows[p] = {frame = row, player = p, hpFill = hpBarFill, distLbl = distLbl}
     end
     plLay.Parent.CanvasSize = UDim2.new(0, 0, 0, plLay.AbsoluteContentSize.Y + 10)
-    if not next(playerRows) then
-        local emptyLbl = Instance.new("TextLabel", playerListFrame)
-        emptyLbl.Size = UDim2.new(1, -10, 0, 40)
-        emptyLbl.BackgroundTransparency = 1
-        emptyLbl.Text = "Oyuncu bulunamadi"
-        emptyLbl.TextColor3 = Color3.fromRGB(150, 150, 150)
-        emptyLbl.Font = Enum.Font.Gotham
-        emptyLbl.TextSize = 12
-        emptyLbl.ZIndex = 3
-    end
 end
 refreshBtn.MouseButton1Click:Connect(buildPlayerList)
 searchBox:GetPropertyChangedSignal("Text"):Connect(function() task.defer(buildPlayerList) end)
@@ -1409,7 +1383,7 @@ for i, pname in ipairs({"Head", "HumanoidRootPart", "UpperTorso", "Torso"}) do
 end
 silentPage.CanvasSize = UDim2.new(0, 0, 0, 360)
 
--- EMOTE (emoji yok)
+-- EMOTE
 local emoteGrid = Instance.new("UIGridLayout", emotePage)
 emoteGrid.CellSize = UDim2.new(0, 148, 0, 60)
 emoteGrid.CellPadding = UDim2.new(0, 6, 0, 6)
@@ -1446,20 +1420,9 @@ task.defer(function() emotePage.CanvasSize = UDim2.new(0, 0, 0, emoteGrid.Absolu
 makeSectionHeader(trollPage, "KARAKTER", 6)
 makeToggle(trollPage, "Kendini Dondur", 34, function(s) toggleFreeze(s) end)
 makeToggle(trollPage, "Kendini Ragdoll Yap", 72, function(s) toggleRagdoll(s) end)
-local trollInfo = Instance.new("TextLabel", trollPage)
-trollInfo.Size = UDim2.new(0, 320, 0, 40)
-trollInfo.Position = UDim2.new(0, 8, 0, 116)
-trollInfo.BackgroundTransparency = 1
-trollInfo.Text = "Bu ozellikler sadece senin karakterini etkiler."
-trollInfo.TextColor3 = Color3.fromRGB(180, 180, 180)
-trollInfo.Font = Enum.Font.Gotham
-trollInfo.TextSize = 11
-trollInfo.TextXAlignment = Enum.TextXAlignment.Left
-trollInfo.TextWrapped = true
-trollInfo.ZIndex = 3
 trollPage.CanvasSize = UDim2.new(0, 0, 0, 200)
 
--- ANTI-BAN (güvenli)
+-- ANTI-BAN (Güvenli)
 makeSectionHeader(antiBanPage, "KORUMA", 6)
 makeToggle(antiBanPage, "Anti-Kick (Guvenli)", 34, function(s)
     if s then
@@ -1468,11 +1431,7 @@ makeToggle(antiBanPage, "Anti-Kick (Guvenli)", 34, function(s)
             local old = mt.__namecall
             setreadonly(mt, false)
             mt.__namecall = newcclosure(function(self, ...)
-                local method = getnamecallmethod()
-                if method == "Kick" then
-                    warn("[STRXcahts] Kick engellendi!")
-                    return
-                end
+                if getnamecallmethod() == "Kick" then return end
                 return old(self, ...)
             end)
             setreadonly(mt, true)
@@ -1486,59 +1445,22 @@ makeToggle(antiBanPage, "Dusuk Grafik Modu", 72, function(s)
     end)
 end)
 makeToggle(antiBanPage, "Legit Mod", 110, function(s)
-    if s then
-        flySpeed = 35; aimbotSmoothness = 12
-        if silentAimEnabled then stopSilentAim() end
-    else
-        flySpeed = 50; aimbotSmoothness = 6
-    end
+    if s then flySpeed = 35; aimbotSmoothness = 12; if silentAimEnabled then stopSilentAim() end
+    else flySpeed = 50; aimbotSmoothness = 6 end
 end)
-local abInfo = Instance.new("TextLabel", antiBanPage)
-abInfo.Size = UDim2.new(0, 320, 0, 60)
-abInfo.Position = UDim2.new(0, 8, 0, 154)
-abInfo.BackgroundTransparency = 1
-abInfo.Text = "Not: Anti-ban sadece client-side koruma saglar. Sunucu tarafli banlari engelleyemez. Legit modu acik tutmani oneririz."
-abInfo.TextColor3 = Color3.fromRGB(255, 200, 0)
-abInfo.Font = Enum.Font.Gotham
-abInfo.TextSize = 11
-abInfo.TextXAlignment = Enum.TextXAlignment.Left
-abInfo.TextYAlignment = Enum.TextYAlignment.Top
-abInfo.TextWrapped = true
-abInfo.ZIndex = 3
-antiBanPage.CanvasSize = UDim2.new(0, 0, 0, 240)
+antiBanPage.CanvasSize = UDim2.new(0, 0, 0, 200)
 
 -- AYARLAR
 makeSectionHeader(settingsPage, "GORUNUM", 6)
 makeToggle(settingsPage, "RGB Renk Modu", 34, function(s) rgbEnabled = s end)
 makeToggle(settingsPage, "FPS Sayaci Goster", 72, function(s) showFps = s; fpsLbl.Visible = s end)
 makeToggle(settingsPage, "Bildirimler", 110, function(s) showNotifs = s end)
-
-makeSectionHeader(settingsPage, "BILGI", 152)
-local sInfo = Instance.new("TextLabel", settingsPage)
-sInfo.Size = UDim2.new(0, 320, 0, 80)
-sInfo.Position = UDim2.new(0, 8, 0, 180)
-sInfo.BackgroundTransparency = 1
-sInfo.Text = "STRXcahts v10\nStable build - Safe mode\nTum hook'lar pcall ile korunuyor."
-sInfo.TextColor3 = Color3.fromRGB(180, 180, 180)
-sInfo.Font = Enum.Font.Gotham
-sInfo.TextSize = 12
-sInfo.TextXAlignment = Enum.TextXAlignment.Left
-sInfo.TextYAlignment = Enum.TextYAlignment.Top
-sInfo.TextWrapped = true
-sInfo.ZIndex = 3
-settingsPage.CanvasSize = UDim2.new(0, 0, 0, 280)
+settingsPage.CanvasSize = UDim2.new(0, 0, 0, 200)
 
 -- PAGE MANAGEMENT
 local pages = {
-    Player = playerPage,
-    Teleport = teleportPage,
-    ESP = espPage,
-    Aimbot = aimbotPage,
-    Silent = silentPage,
-    Emote = emotePage,
-    Troll = trollPage,
-    ["Anti-Ban"] = antiBanPage,
-    Ayarlar = settingsPage,
+    Player = playerPage, Teleport = teleportPage, ESP = espPage, Aimbot = aimbotPage,
+    Silent = silentPage, Emote = emotePage, Troll = trollPage, ["Anti-Ban"] = antiBanPage, Ayarlar = settingsPage,
 }
 local activeTab = "Player"
 
@@ -1561,7 +1483,6 @@ UserInputService.InputBegan:Connect(function(input, gp)
     if listeningForBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
             if input.KeyCode == Enum.KeyCode.Escape then
-                -- İptal
                 local id = listeningForBind
                 listeningForBind = nil
                 local btn = keybindButtons[id]
@@ -1606,9 +1527,7 @@ task.spawn(function()
         task.wait(0.1)
         if rgbEnabled then
             local col = getRGBColor()
-            for n, t in pairs(tabs) do
-                if n == activeTab then t.BackgroundColor3 = col end
-            end
+            for n, t in pairs(tabs) do if n == activeTab then t.BackgroundColor3 = col end end
             Title.BackgroundColor3 = col
         else
             Title.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
@@ -1632,15 +1551,10 @@ task.spawn(function()
     end
 end)
 
--- Status updater
 task.spawn(function()
-    while true do
-        task.wait(0.5)
-        updateStatus()
-    end
+    while true do task.wait(0.5) updateStatus() end
 end)
 
--- Respawn
 LocalPlayer.CharacterAdded:Connect(function()
     task.wait(1.5)
     applyWalkSpeed()
@@ -1700,4 +1614,4 @@ task.spawn(function()
     applyWalkSpeed()
 end)
 
-print("STRXcahts v10 hazir | Stable | No emoji | Spin geri | Safe anti-ban | Floating loading")
+print("STRXcahts v11 hazir | ESP Fixlendi | Kick Korumasi | Aimbot Stabil")
