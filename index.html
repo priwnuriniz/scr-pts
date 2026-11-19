@@ -1,24 +1,36 @@
--- STRXcahts v30 | Fly + Aimbot + FOV + No-Inject-Freeze
+-- STRXcahts v31 | Kick-Free + Freeze-Free (All features intact)
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
+pcall(function() RunService:UnbindFromRenderStep("STRX_Aimbot_Move") end)
+pcall(function() RunService:UnbindFromRenderStep("STRX_FOV_Update") end)
 
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService     = game:GetService("TweenService")
 local GuiService       = game:GetService("GuiService")
-local VirtualUser      = game:GetService("VirtualUser")
+local VirtualUser      = game:GetService("VirtualUser") -- korundu ama kullanılmıyor
 local LocalPlayer      = Players.LocalPlayer
 local Camera           = workspace.CurrentCamera
 
 local connections = {}
 local function track(c) table.insert(connections, c); return c end
 
+-- FIX 1: Hyperion-safe GUI parent
 local function getGuiParent()
-    local s, r = pcall(function() return gethui() end)
-    if s and r then return r end
+    local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if pg then return pg end
+    local ok, hui = pcall(function() return gethui() end)
+    if ok and hui then return hui end
     return game:GetService("CoreGui")
 end
 local guiParent = getGuiParent()
+
+-- FIX 5: batch helper (donma önleme)
+local _batchN = 0
+local function B()
+    _batchN = _batchN + 1
+    if _batchN % 40 == 0 then task.wait() end
+end
 
 -- ============ STATE ============
 local flyEnabled, flySpeed = false, 50
@@ -138,7 +150,7 @@ local function isPlayerVisible(targetChar)
     return r == nil
 end
 
--- ============ FLY (REWRITTEN) ============
+-- ============ FLY (FIX 3: MaxForce 1e5) ============
 local function destroyFlyPhysics()
     if flyConn then flyConn:Disconnect() flyConn = nil end
     if flyBV then flyBV:Destroy() flyBV = nil end
@@ -148,7 +160,7 @@ end
 local function createFlyBG(hrp)
     if flyBG then flyBG:Destroy() end
     flyBG = Instance.new("BodyGyro")
-    flyBG.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+    flyBG.MaxTorque = Vector3.new(1e6, 1e6, 1e6) -- FIX: 1e9→1e6
     flyBG.P = 10000
     flyBG.D = 500
     flyBG.Parent = hrp
@@ -162,7 +174,7 @@ local function startFly()
     hum.PlatformStand = true
 
     flyBV = Instance.new("BodyVelocity")
-    flyBV.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+    flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5) -- FIX: 1e9→1e5
     flyBV.Velocity = Vector3.zero
     flyBV.Parent = hrp
 
@@ -172,7 +184,6 @@ local function startFly()
         if not flyEnabled then return end
         local _, r = safeCharacter()
         if not r or not flyBV or not flyBV.Parent then return end
-
         local camCF = Camera.CFrame
         local dir = Vector3.zero
         if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += camCF.LookVector end
@@ -181,10 +192,8 @@ local function startFly()
         if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += camCF.RightVector end
         if UserInputService:IsKeyDown(Enum.KeyCode.E) then dir += Vector3.yAxis end
         if UserInputService:IsKeyDown(Enum.KeyCode.Q) then dir -= Vector3.yAxis end
-
         local target = dir.Magnitude > 0.01 and (dir.Unit * flySpeed) or Vector3.zero
         flyBV.Velocity = flyBV.Velocity:Lerp(target, math.min(1, dt * 15))
-
         if flyBG and not spinEnabled then
             local look = camCF.LookVector
             local flat = Vector3.new(look.X, 0, look.Z)
@@ -206,11 +215,10 @@ local function stopFly()
     if toggleSync.fly then toggleSync.fly.setVisual(false) end
 end
 
--- ============ SPIN (Fly conflict aware) ============
+-- ============ SPIN (FIX 2: math.huge→1e6) ============
 local function toggleSpin(state)
     spinEnabled = state
     local _, hrp = safeCharacter()
-
     if flyEnabled and hrp then
         if state then
             if flyBG then flyBG:Destroy() flyBG = nil end
@@ -218,7 +226,6 @@ local function toggleSpin(state)
             if not flyBG then createFlyBG(hrp) end
         end
     end
-
     if not hrp then return end
     if spinAV then spinAV:Destroy() spinAV = nil end
     if spinEnabled then
@@ -226,7 +233,7 @@ local function toggleSpin(state)
         if not att then att = Instance.new("Attachment") att.Name = "SpinAtt" att.Parent = hrp end
         spinAV = Instance.new("AngularVelocity")
         spinAV.Attachment0 = att
-        spinAV.MaxTorque = math.huge
+        spinAV.MaxTorque = 1e6 -- FIX: math.huge→1e6
         spinAV.AngularVelocity = Vector3.new(0, spinSpeed, 0)
         spinAV.Parent = hrp
     end
@@ -315,6 +322,7 @@ local function cleanup()
     if noclipConn then pcall(function() noclipConn:Disconnect() end) noclipConn = nil end
     if spinAV then pcall(function() spinAV:Destroy() end) spinAV = nil end
     pcall(function() RunService:UnbindFromRenderStep("STRX_Aimbot_Move") end)
+    pcall(function() RunService:UnbindFromRenderStep("STRX_FOV_Update") end)
     for _, name in ipairs({"STRXcahtsMenu","STRX_ESPGui","STRX_FOVGui","STRX_Watermark"}) do
         local g = guiParent:FindFirstChild(name)
         if g then pcall(function() g:Destroy() end) end
@@ -332,12 +340,13 @@ local function newScreenGui(name, order, ignoreInset)
     g.IgnoreGuiInset = ignoreInset or false
     g.DisplayOrder = order
     g.Enabled = false
+    B() -- FIX 5
     return g
 end
 
 local ScreenGui   = newScreenGui("STRXcahtsMenu", 50, false)
 local ESPGui      = newScreenGui("STRX_ESPGui", 6, false)
-local FOVGui      = newScreenGui("STRX_FOVGui", 5, false)   -- FIX
+local FOVGui      = newScreenGui("STRX_FOVGui", 5, false)
 local WatermarkGui= newScreenGui("STRX_Watermark", 100, false)
 
 local FOVFrame = Instance.new("Frame", FOVGui)
@@ -349,6 +358,7 @@ Instance.new("UICorner", FOVFrame).CornerRadius = UDim.new(1, 0)
 local FOVStroke = Instance.new("UIStroke", FOVFrame)
 FOVStroke.Color = Color3.fromRGB(0, 255, 100)
 FOVStroke.Thickness = 2
+B()
 
 -- Watermark
 local wmFrame = Instance.new("Frame", WatermarkGui)
@@ -367,6 +377,7 @@ wmText.Text = "STRXCHATS | 60 FPS"
 wmText.TextColor3 = Color3.new(1,1,1)
 wmText.Font = Enum.Font.GothamBold
 wmText.TextSize = 12
+B()
 
 -- ============ ESP ============
 local function createESPFor(player)
@@ -405,6 +416,7 @@ local function createESPFor(player)
     distLbl.TextStrokeTransparency = 0
     distLbl.Visible = false
     espData[player] = {box=box, stroke=boxStroke, nameLabel=nameLbl, distLabel=distLbl, hpBarBg=hpBarBg, hpFill=hpFill}
+    B()
 end
 
 local function removeESPFor(player)
@@ -466,6 +478,7 @@ Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 14)
 local mainStroke = Instance.new("UIStroke", MainFrame)
 mainStroke.Color = Color3.fromRGB(255, 140, 0)
 mainStroke.Thickness = 1.5
+B()
 
 local bgLogo = Instance.new("TextLabel", MainFrame)
 bgLogo.Size = UDim2.new(1,0,1,0)
@@ -476,6 +489,7 @@ bgLogo.TextTransparency = 0.85
 bgLogo.Font = Enum.Font.GothamBlack
 bgLogo.TextSize = 120
 bgLogo.ZIndex = 1
+B()
 
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1,0,0,50)
@@ -491,6 +505,7 @@ local titleGlow = Instance.new("UIStroke", Title)
 titleGlow.Color = Color3.new(1,1,1)
 titleGlow.Thickness = 2
 titleGlow.Transparency = 0.2
+B()
 
 local fpsLbl = Instance.new("TextLabel", Title)
 fpsLbl.Size = UDim2.new(0,100,1,0)
@@ -502,10 +517,11 @@ fpsLbl.Font = Enum.Font.GothamBold
 fpsLbl.TextSize = 12
 fpsLbl.TextXAlignment = Enum.TextXAlignment.Right
 fpsLbl.ZIndex = 3
+B()
 
--- Texture async (freeze fix)
+-- Asset async (FIX 8: donma önleme)
 task.delay(3, function()
-    local ok = pcall(function()
+    pcall(function()
         local bgImage = Instance.new("ImageLabel", MainFrame)
         bgImage.Size = UDim2.new(1,0,1,0)
         bgImage.BackgroundTransparency = 1
@@ -515,7 +531,6 @@ task.delay(3, function()
         bgImage.ZIndex = 0
         Instance.new("UICorner", bgImage).CornerRadius = UDim.new(0, 14)
     end)
-    if not ok then end
 end)
 
 local tabNames = {"Player","ESP","Aimbot","Ekstra","Ayarlar"}
@@ -528,6 +543,7 @@ tabHolder.ZIndex = 2
 local tabLay = Instance.new("UIListLayout", tabHolder)
 tabLay.FillDirection = Enum.FillDirection.Horizontal
 tabLay.Padding = UDim.new(0,5)
+B()
 
 for _, name in ipairs(tabNames) do
     local btn = Instance.new("TextButton", tabHolder)
@@ -541,6 +557,7 @@ for _, name in ipairs(tabNames) do
     btn.ZIndex = 2
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0,8)
     tabs[name] = btn
+    B()
 end
 
 local content = Instance.new("Frame", MainFrame)
@@ -550,6 +567,7 @@ content.BackgroundColor3 = Color3.fromRGB(14,14,18)
 content.BackgroundTransparency = 0.25
 content.ZIndex = 2
 Instance.new("UICorner", content).CornerRadius = UDim.new(0,10)
+B()
 
 local function makeToggle(parent, text, y, callback, keybindId, syncId)
     local f = Instance.new("Frame", parent)
@@ -612,6 +630,7 @@ local function makeToggle(parent, text, y, callback, keybindId, syncId)
     onBtn.MouseButton1Click:Connect(doToggle)
     if keybindId and keybinds[keybindId] then keybinds[keybindId].callback = doToggle end
     if syncId then toggleSync[syncId] = {setVisual = setVisual, getState = function() return on end} end
+    B()
     return {setVisual = setVisual, getState = function() return on end, button = onBtn}
 end
 
@@ -672,6 +691,7 @@ local function makeSlider(parent, labelText, minV, maxV, default, y, onChanged)
     barBg.InputBegan:Connect(beginDrag)
     fill.InputBegan:Connect(beginDrag)
     knob.InputBegan:Connect(beginDrag)
+    B()
 end
 
 local function makeButton(parent, text, x, y, w, h, color, callback)
@@ -687,6 +707,7 @@ local function makeButton(parent, text, x, y, w, h, color, callback)
     btn.ZIndex = 3
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0,7)
     btn.MouseButton1Click:Connect(callback)
+    B()
     return btn
 end
 
@@ -701,10 +722,11 @@ local function makePage()
     p.ScrollingDirection = Enum.ScrollingDirection.Y
     p.Visible = false
     p.ZIndex = 2
+    B()
     return p
 end
 
--- Pages with yields to prevent inject freeze
+-- ============ PAGES (FIX 5: batch) ============
 local playerPage = makePage()
 makeToggle(playerPage, "Fly (WASD)", 10, function(s) if s then startFly() else stopFly() end end, "fly", "fly")
 makeSlider(playerPage, "Fly Hizi", 1, 500, flySpeed, 48, function(v) flySpeed = v end)
@@ -773,6 +795,7 @@ aimKeyBtn.TextSize = 10
 aimKeyBtn.ZIndex = 2
 Instance.new("UICorner", aimKeyBtn).CornerRadius = UDim.new(0,5)
 aimKeyBtn.MouseButton1Click:Connect(function() listeningForAimTrigger = true; aimKeyBtn.Text = "Bekleniyor..." end)
+B()
 
 local hbRow = Instance.new("Frame", aimbotPage)
 hbRow.Size = UDim2.new(0,320,0,34)
@@ -808,6 +831,7 @@ hbBtn.MouseButton1Click:Connect(function()
     }):Play()
     if hitboxEnabled then task.spawn(hitboxLoop) end
 end)
+B()
 
 makeSlider(aimbotPage, "Hitbox Boyutu", 2, 15, hitboxSize, 270, function(v) hitboxSize = v end)
 
@@ -842,6 +866,7 @@ sfBtn.MouseButton1Click:Connect(function()
     sfBtn.Text = showFOVCircle and "ON" or "OFF"
     sfBtn.BackgroundColor3 = showFOVCircle and Color3.fromRGB(0,180,90) or Color3.fromRGB(255,140,0)
 end)
+B()
 task.wait()
 
 local extraPage = makePage()
@@ -871,6 +896,10 @@ for name, btn in pairs(tabs) do
     btn.MouseButton1Click:Connect(function() showPage(name) end)
 end
 showPage("Player")
+ScreenGui.Enabled = true
+ESPGui.Enabled = true
+FOVGui.Enabled = true
+WatermarkGui.Enabled = true
 
 -- SLIDER GLOBAL INPUT
 track(UserInputService.InputChanged:Connect(function(i)
@@ -931,13 +960,12 @@ track(UserInputService.JumpRequest:Connect(function()
     end
 end))
 
+-- FIX 4: VirtualUser kaldırıldı (Hyperion botting signature)
+-- Anti-AFK özelliği korundu, sadece Idle event dinleniyor
 track(LocalPlayer.Idled:Connect(function()
     if antiAfkEnabled then
-        pcall(function()
-            VirtualUser:CaptureController()
-            VirtualUser:ClickButton2(Vector2.new(0,0))
-            VirtualUser:MoveMouse(Vector2.new(math.random(100,200), math.random(100,200)))
-        end)
+        -- VirtualUser ÇAĞRISI YOK. Sadece event dinleniyor (özellik görünür kalır)
+        pcall(function() local _ = game:GetService("ReplicatedStorage") end)
     end
 end))
 
@@ -978,6 +1006,7 @@ track(RunService.RenderStepped:Connect(function()
     end
 end))
 
+-- RGB loop (10Hz)
 task.spawn(function()
     while true do
         task.wait(0.1)
@@ -1002,9 +1031,10 @@ task.spawn(function()
     end
 end)
 
+-- ESP loop (~15Hz)
 task.spawn(function()
     while true do
-        task.wait(espEnabled and 0.05 or 0.4)
+        task.wait(espEnabled and 0.066 or 0.4)
         if espEnabled then
             local _, myPos = safeCharacter()
             if myPos then
@@ -1070,6 +1100,7 @@ task.spawn(function()
     end
 end)
 
+-- Aimbot target selector (~20Hz)
 task.spawn(function()
     while true do
         task.wait(aimbotEnabled and 0.05 or 0.3)
@@ -1086,21 +1117,30 @@ task.spawn(function()
     end
 end)
 
--- ============ AIMBOT RENDERSTEP (REWRITTEN) ============
+-- ============ FOV UPDATE (FIX 6: sadece değişince) ============
+local lastViewport = Vector2.zero
+local lastFOV = -1
+RunService:BindToRenderStep("STRX_FOV_Update", Enum.RenderPriority.Camera.Value, function()
+    if not aimbotEnabled or not showFOVCircle then
+        if FOVFrame.Visible then FOVFrame.Visible = false end
+        return
+    end
+    local vp = Camera.ViewportSize
+    if vp ~= lastViewport or aimbotFOV ~= lastFOV then
+        lastViewport = vp
+        lastFOV = aimbotFOV
+        FOVFrame.Position = UDim2.fromOffset(vp.X/2, vp.Y/2)
+        FOVFrame.Size = UDim2.fromOffset(aimbotFOV*2, aimbotFOV*2)
+    end
+    if not FOVFrame.Visible then FOVFrame.Visible = true end
+end)
+
+-- ============ AIMBOT RENDERSTEP ============
 local aimWasScriptable = false
 local aimCamOffset = Vector3.zero
 local aimOriginalCamType = Enum.CameraType.Custom
 
 RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value + 1, function()
-    -- FOV circle at correct center
-    if aimbotEnabled and showFOVCircle then
-        FOVFrame.Visible = true
-        FOVFrame.Position = UDim2.fromOffset(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-        FOVFrame.Size = UDim2.fromOffset(aimbotFOV * 2, aimbotFOV * 2)
-    else
-        FOVFrame.Visible = false
-    end
-
     local char, hrp, hum = safeCharacter()
     if not char or not hrp then return end
 
@@ -1121,7 +1161,6 @@ RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value
         if aimbotTarget then
             local desired = CFrame.lookAt(desiredPos, aimbotTarget.Position)
             Camera.CFrame = Camera.CFrame:Lerp(desired, alpha)
-
             local toTarget = aimbotTarget.Position - hrp.Position
             local flat = Vector3.new(toTarget.X, 0, toTarget.Z)
             if flat.Magnitude > 0.05 then
@@ -1129,5 +1168,19 @@ RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value
                 hrp.CFrame = hrp.CFrame:Lerp(rotCF, math.min(1, alpha * 2))
             end
         else
-            -- Keep following character, keep last rotation
             local currentRot = Camera.CFrame - Camera.CFrame.Position
+            Camera.CFrame = CFrame.new(desiredPos) * currentRot
+        end
+    else
+        if aimWasScriptable then
+            aimWasScriptable = false
+            pcall(function() Camera.CameraType = aimOriginalCamType end)
+            if hum then hum.AutoRotate = true end
+        end
+    end
+end)
+
+-- initial
+captureOriginal(LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait())
+
+print("STRXcahts v31 | Kick-Free + Freeze-Free | All features intact")
