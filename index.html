@@ -1,5 +1,4 @@
--- STRXcahts v18 | GUI ESP | mousemoverel Aimbot | FOV Circle
--- No Teleport | No Silent Aim | Stable
+-- STRXcahts v20 | Troll Removed | ESP Fixed & Upgraded | Color Logic Fixed
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -32,8 +31,9 @@ local showFps = true
 
 -- ESP
 local espEnabled = false
-local espVisibleColor = Color3.fromRGB(0, 255, 100)
-local espHiddenColor = Color3.fromRGB(255, 60, 60)
+local espShowName, espShowHealth, espShowDistance = true, true, true
+local espVisibleColor = Color3.fromRGB(0, 255, 100)  -- Görünürse Yeşil
+local espHiddenColor = Color3.fromRGB(255, 60, 60)   -- Duvar Arkası Kırmızı
 local espMaxDistance = 1000
 local espData = {}
 
@@ -48,25 +48,20 @@ local aimbotTarget = nil
 local lastAimScan = 0
 local showFOVCircle = true
 
--- Troll
-local frozenEnabled, ragdollEnabled = false, false
-local frozenAnchors = {}
-local origLighting = {}
-
 -- Physics
 local flyBV, flyBG, flyConn
 local noclipConn
 local spinAV
 
--- Keybinds
+-- KEYBINDS (Hepsi Boş)
 local keybinds = {
-    fly = {key = Enum.KeyCode.F, callback = nil},
-    aimbot = {key = Enum.KeyCode.F2, callback = nil},
-    esp = {key = Enum.KeyCode.X, callback = nil},
-    noclip = {key = Enum.KeyCode.N, callback = nil},
-    infJump = {key = Enum.KeyCode.J, callback = nil},
-    spin = {key = Enum.KeyCode.B, callback = nil},
-    walkSpeed = {key = Enum.KeyCode.V, callback = nil},
+    fly = {key = nil, callback = nil},
+    aimbot = {key = nil, callback = nil},
+    esp = {key = nil, callback = nil},
+    noclip = {key = nil, callback = nil},
+    infJump = {key = nil, callback = nil},
+    spin = {key = nil, callback = nil},
+    walkSpeed = {key = nil, callback = nil},
     menu = {key = Enum.KeyCode.Insert, callback = nil},
 }
 local listeningForBind = nil
@@ -97,6 +92,23 @@ local function isAimbotTriggered()
         end
     end
     return false
+end
+
+-- KUSURSUZ RAYCAST (Duvar Arkası Kontrolü)
+local function isPlayerVisible(targetChar)
+    local myChar = LocalPlayer.Character
+    if not myChar then return false end
+    local targetHead = targetChar:FindFirstChild("Head") or targetChar:FindFirstChild("HumanoidRootPart")
+    if not targetHead then return false end
+    
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    -- Kendi karakterini, hedef karakteri ve kamerayı hariç tut
+    rayParams.FilterDescendantsInstances = {targetChar, myChar, Camera}
+    
+    local result = workspace:Raycast(Camera.CFrame.Position, targetHead.Position - Camera.CFrame.Position, rayParams)
+    -- Eğer ışın hiçbir yere çarpmadıysa veya hedefe çarptıysa GÖRÜNÜYOR demektir
+    return result == nil or result.Instance:IsDescendantOf(targetChar)
 end
 
 -- ==== FLY / SPEED / NOCLIP ====
@@ -206,46 +218,84 @@ end)
 local function toggleFullbright(state)
     fullbrightEnabled = state
     if state then
-        origLighting.Brightness = Lighting.Brightness
-        origLighting.Ambient = Lighting.Ambient
-        origLighting.OutdoorAmbient = Lighting.OutdoorAmbient
-        origLighting.GlobalShadows = Lighting.GlobalShadows
         Lighting.Brightness = 2
         Lighting.Ambient = Color3.fromRGB(178, 178, 178)
         Lighting.OutdoorAmbient = Color3.fromRGB(178, 178, 178)
         Lighting.GlobalShadows = false
-    elseif origLighting.Brightness then
-        Lighting.Brightness = origLighting.Brightness
-        Lighting.Ambient = origLighting.Ambient
-        Lighting.OutdoorAmbient = origLighting.OutdoorAmbient
-        Lighting.GlobalShadows = origLighting.GlobalShadows
+    else
+        Lighting.Brightness = 1
+        Lighting.Ambient = Color3.fromRGB(70, 70, 70)
+        Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
+        Lighting.GlobalShadows = true
     end
 end
 
--- ==== YENİ NESİL 2D ESP (SCREEN GUI) ====
+-- ==== GUI'LER ====
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "STRXcahtsMenu"
+ScreenGui.Parent = guiParent
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Enabled = true
+ScreenGui.IgnoreGuiInset = true
+
 local ESPGui = Instance.new("ScreenGui")
 ESPGui.Name = "STRX_ESPGui"
 ESPGui.Parent = guiParent
 ESPGui.ResetOnSpawn = false
 ESPGui.IgnoreGuiInset = true
 
+local FOVGui = Instance.new("ScreenGui")
+FOVGui.Name = "STRX_FOVGui"
+FOVGui.Parent = guiParent
+FOVGui.ResetOnSpawn = false
+FOVGui.IgnoreGuiInset = true
+
+local FOVFrame = Instance.new("Frame", FOVGui)
+FOVFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+FOVFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+FOVFrame.BackgroundTransparency = 1
+FOVFrame.Visible = false
+Instance.new("UICorner", FOVFrame).CornerRadius = UDim.new(1, 0)
+local FOVStroke = Instance.new("UIStroke", FOVFrame)
+FOVStroke.Color = Color3.fromRGB(0, 255, 100)
+FOVStroke.Thickness = 2
+
+-- ==== YENİ NESİL ESP (KUSURSUZ ÇİZİM) ====
 local function createESPFor(player)
     if player == LocalPlayer then return end
     if espData[player] then
-        if espData[player].frame then espData[player].frame:Destroy() end
+        if espData[player].box then espData[player].box:Destroy() end
         if espData[player].nameLabel then espData[player].nameLabel:Destroy() end
         if espData[player].distLabel then espData[player].distLabel:Destroy() end
+        if espData[player].hpBarBg then espData[player].hpBarBg:Destroy() end
     end
 
-    local frame = Instance.new("Frame", ESPGui)
-    frame.BackgroundTransparency = 1
-    frame.BorderSizePixel = 0
-    frame.Visible = false
-    
-    local stroke = Instance.new("UIStroke", frame)
-    stroke.Color = espVisibleColor
-    stroke.Thickness = 1.5
+    -- Kutu
+    local box = Instance.new("Frame", ESPGui)
+    box.BackgroundTransparency = 1
+    box.BorderSizePixel = 0
+    box.Visible = false
+    local boxStroke = Instance.new("UIStroke", box)
+    boxStroke.Thickness = 1.5
 
+    -- Can Barı Arka Planı (Kutunun solunda)
+    local hpBarBg = Instance.new("Frame", box)
+    hpBarBg.Size = UDim2.new(0, 3, 1, 0)
+    hpBarBg.Position = UDim2.new(0, -6, 0, 0)
+    hpBarBg.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    hpBarBg.BorderSizePixel = 0
+    hpBarBg.Visible = false
+
+    -- Can Barı Dolgusu (Yeşilden Kırmızıya)
+    local hpBarFill = Instance.new("Frame", hpBarBg)
+    hpBarFill.Size = UDim2.new(1, 0, 1, 0)
+    hpBarFill.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+    hpBarFill.BorderSizePixel = 0
+    -- Aşağıdan yukarıya dolması için AnchorPoint
+    hpBarFill.AnchorPoint = Vector2.new(0, 1)
+    hpBarFill.Position = UDim2.new(0, 0, 1, 0)
+
+    -- İsim
     local nameLbl = Instance.new("TextLabel", ESPGui)
     nameLbl.BackgroundTransparency = 1
     nameLbl.Text = player.Name
@@ -255,30 +305,43 @@ local function createESPFor(player)
     nameLbl.TextStrokeTransparency = 0
     nameLbl.Visible = false
 
+    -- Mesafe
     local distLbl = Instance.new("TextLabel", ESPGui)
     distLbl.BackgroundTransparency = 1
-    distLbl.TextColor3 = Color3.fromRGB(255, 200, 0)
     distLbl.Font = Enum.Font.Gotham
     distLbl.TextSize = 12
     distLbl.TextStrokeTransparency = 0
     distLbl.Visible = false
 
     espData[player] = {
-        frame = frame, stroke = stroke,
-        nameLabel = nameLbl, distLabel = distLbl
+        box = box, stroke = boxStroke, 
+        nameLabel = nameLbl, distLabel = distLbl,
+        hpBarBg = hpBarBg, hpFill = hpBarFill
     }
 end
 
 local function removeESPFor(player)
     if espData[player] then
-        if espData[player].frame then espData[player].frame:Destroy() end
+        if espData[player].box then espData[player].box:Destroy() end
         if espData[player].nameLabel then espData[player].nameLabel:Destroy() end
         if espData[player].distLabel then espData[player].distLabel:Destroy() end
         espData[player] = nil
     end
 end
 
--- ==== AIMBOT (mousemoverel ile Garantili) ====
+Players.PlayerAdded:Connect(function(p)
+    p.CharacterAdded:Connect(function() if espEnabled then removeESPFor(p) task.wait(0.5) createESPFor(p) end end)
+    if espEnabled then createESPFor(p) end
+end)
+Players.PlayerRemoving:Connect(function(p) removeESPFor(p) end)
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= LocalPlayer then
+        p.CharacterAdded:Connect(function() if espEnabled then removeESPFor(p) task.wait(0.5) createESPFor(p) end end)
+        if espEnabled then createESPFor(p) end
+    end
+end
+
+-- ==== AIMBOT ====
 local aimRayParams = RaycastParams.new()
 aimRayParams.FilterType = Enum.RaycastFilterType.Exclude
 
@@ -295,11 +358,7 @@ local function getAimbotTarget()
         local hum = char:FindFirstChildOfClass("Humanoid")
         if not hum or hum.Health <= 0 then continue end
         
-        local targetPart = char:FindFirstChild(aimbotAimPart) 
-            or char:FindFirstChild("UpperTorso") 
-            or char:FindFirstChild("Torso") 
-            or char:FindFirstChild("HumanoidRootPart")
-            
+        local targetPart = char:FindFirstChild(aimbotAimPart) or char:FindFirstChild("HumanoidRootPart")
         if not targetPart then continue end
         
         local sp, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
@@ -317,75 +376,45 @@ local function getAimbotTarget()
     return closest
 end
 
--- FOV Çizgisi (Nişangah)
-local FOVFrame = Instance.new("Frame", ScreenGui)
-FOVFrame.BackgroundTransparency = 1
-FOVFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-FOVFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-FOVFrame.Visible = false
-FOVFrame.ZIndex = 99
-local FOVCorner = Instance.new("UICorner", FOVFrame)
-FOVCorner.CornerRadius = UDim.new(1, 0)
-local FOVStroke = Instance.new("UIStroke", FOVFrame)
-FOVStroke.Color = Color3.fromRGB(0, 255, 100)
-FOVStroke.Thickness = 1.5
-FOVStroke.Transparency = 0.3
-
--- Aimbot Ana Döngüsü
 RunService.RenderStepped:Connect(function()
-    if aimbotEnabled then
-        -- FOV Çizgisi Güncelle
-        if showFOVCircle then
-            FOVFrame.Visible = true
-            -- FOV değerini boyuta çevir (Yaklaşık bir oran)
-            local size = (aimbotFOV / Camera.ViewportSize.Y) * 2
-            FOVFrame.Size = UDim2.new(size, 0, size, 0)
-        else
-            FOVFrame.Visible = false
-        end
-
-        if isAimbotTriggered() then
-            local now = tick()
-            if now - lastAimScan >= 0.05 then
-                lastAimScan = now
-                if not aimbotTarget or not aimbotTarget.Parent or not aimbotTarget.Parent:FindFirstChildOfClass("Humanoid") or aimbotTarget.Parent.Humanoid.Health <= 0 then
-                    aimbotTarget = getAimbotTarget()
-                end
-            end
-
-            if aimbotTarget then
-                local targetScreenPos, onScreen = Camera:WorldToViewportPoint(aimbotTarget.Position)
-                if onScreen then
-                    local screenCenter = Camera.ViewportSize / 2
-                    local x = targetScreenPos.X - screenCenter.X
-                    local y = targetScreenPos.Y - screenCenter.Y
-                    
-                    local smoothFactor = aimbotSmoothness * 5
-                    if mousemoverel then
-                        mousemoverel(x / smoothFactor, y / smoothFactor)
-                    else
-                        local cf = CFrame.new(Camera.CFrame.Position, aimbotTarget.Position)
-                        Camera.CFrame = Camera.CFrame:Lerp(cf, 1 / math.max(aimbotSmoothness, 1))
-                    end
-                end
-            end
-        end
+    if aimbotEnabled and showFOVCircle then
+        FOVFrame.Visible = true
+        local size = aimbotFOV * 2
+        FOVFrame.Size = UDim2.fromOffset(size, size)
     else
         FOVFrame.Visible = false
     end
+
+    if not aimbotEnabled then return end
+
+    if isAimbotTriggered() then
+        local now = tick()
+        if now - lastAimScan >= 0.05 then
+            lastAimScan = now
+            if not aimbotTarget or not aimbotTarget.Parent or not aimbotTarget.Parent:FindFirstChildOfClass("Humanoid") or aimbotTarget.Parent.Humanoid.Health <= 0 then
+                aimbotTarget = getAimbotTarget()
+            end
+        end
+
+        if aimbotTarget then
+            local targetScreenPos, onScreen = Camera:WorldToViewportPoint(aimbotTarget.Position)
+            if onScreen then
+                local screenCenter = Camera.ViewportSize / 2
+                local x = targetScreenPos.X - screenCenter.X
+                local y = targetScreenPos.Y - screenCenter.Y
+                local smoothFactor = aimbotSmoothness * 5
+                if mousemoverel then
+                    mousemoverel(x / smoothFactor, y / smoothFactor)
+                else
+                    local cf = CFrame.new(Camera.CFrame.Position, aimbotTarget.Position)
+                    Camera.CFrame = Camera.CFrame:Lerp(cf, 1 / math.max(aimbotSmoothness, 1))
+                end
+            end
+        end
+    end
 end)
 
--- =============================================
--- ==== UI BAŞLANGIÇ ====
--- =============================================
-
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "STRXcahtsMenu"
-ScreenGui.Parent = guiParent
-ScreenGui.ResetOnSpawn = false
-ScreenGui.Enabled = true
-ScreenGui.IgnoreGuiInset = true
-
+-- ==== MENÜ UI ====
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 680, 0, 540)
 MainFrame.Position = UDim2.new(0.5, -340, 0.5, -270)
@@ -410,7 +439,7 @@ Instance.new("UICorner", bgImage).CornerRadius = UDim.new(0, 14)
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1, 0, 0, 50)
 Title.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
-Title.Text = "  STRXcahts v18  |  Insert = Ac/Kapat"
+Title.Text = "  STRXcahts v20  |  Insert = Ac/Kapat"
 Title.TextColor3 = Color3.new(1,1,1)
 Title.Font = Enum.Font.GothamBlack
 Title.TextSize = 15
@@ -434,7 +463,8 @@ fpsLbl.TextSize = 12
 fpsLbl.TextXAlignment = Enum.TextXAlignment.Right
 fpsLbl.ZIndex = 3
 
-local tabNames = {"Player", "ESP", "Aimbot", "Emote", "Troll", "Ayarlar"}
+-- TROLL MENÜSÜ KALDIRILDI
+local tabNames = {"Player", "ESP", "Aimbot", "Emote", "Ayarlar"}
 local tabs = {}
 local tabHolder = Instance.new("Frame", MainFrame)
 tabHolder.Size = UDim2.new(1, -30, 0, 34)
@@ -493,7 +523,7 @@ local function makeToggle(parent, text, y, callback, keybindId)
         kbBtn.Size = UDim2.new(0, 54, 0, 22)
         kbBtn.Position = UDim2.new(1, -118, 0.5, -11)
         kbBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-        kbBtn.Text = keybinds[keybindId].key and keybinds[keybindId].key.Name or "---"
+        kbBtn.Text = keybinds[keybindId].key and keybinds[keybindId].key.Name or "Yok"
         kbBtn.TextColor3 = Color3.new(1,1,1)
         kbBtn.Font = Enum.Font.GothamBold
         kbBtn.TextSize = 10
@@ -611,7 +641,6 @@ local playerPage = makePage()
 local espPage = makePage()
 local aimbotPage = makePage()
 local emotePage = makePage()
-local trollPage = makePage()
 local settingsPage = makePage()
 
 -- PLAYER
@@ -631,15 +660,20 @@ makeToggle(playerPage, "Fullbright", 490, function(s) toggleFullbright(s) end)
 -- ESP
 makeToggle(espPage, "ESP Ac/Kapat", 10, function(s) 
     espEnabled = s
-    if not s then
+    if s then
+        for _, p in ipairs(Players:GetPlayers()) do createESPFor(p) end
+    else
         for p, data in pairs(espData) do
-            if data.frame then data.frame.Visible = false end
+            if data.box then data.box.Visible = false end
             if data.nameLabel then data.nameLabel.Visible = false end
             if data.distLabel then data.distLabel.Visible = false end
         end
     end
 end, "esp")
-makeSlider(espPage, "Max Mesafe", 50, 3000, espMaxDistance, 50, function(v) espMaxDistance = v end)
+makeToggle(espPage, "Isim Goster", 50, function(s) espShowName = s end)
+makeToggle(espPage, "Can Goster", 90, function(s) espShowHealth = s end)
+makeToggle(espPage, "Mesafe Goster", 130, function(s) espShowDistance = s end)
+makeSlider(espPage, "Max Mesafe", 50, 3000, espMaxDistance, 170, function(v) espMaxDistance = v end)
 
 -- AIMBOT
 makeToggle(aimbotPage, "Aimbot Ac/Kapat", 10, function(s) aimbotEnabled = s; if not s then aimbotTarget = nil end end, "aimbot")
@@ -733,15 +767,11 @@ for i, e in ipairs(emoteList) do
     end)
 end
 
--- TROLL
-makeToggle(trollPage, "Kendini Dondur", 10, function(s) frozenEnabled = s; if s then local char = LocalPlayer.Character if char then for _, v in ipairs(char:GetDescendants()) do if v:IsA("BasePart") then v.Anchored = true end end end else local char = LocalPlayer.Character if char then for _, v in ipairs(char:GetDescendants()) do if v:IsA("BasePart") then v.Anchored = false end end end end end)
-makeToggle(trollPage, "Kendini Ragdoll Yap", 50, function(s) local _, _, hum = safeCharacter() if hum then hum.PlatformStand = s end end)
-
 -- AYARLAR
 makeToggle(settingsPage, "RGB Renk Modu", 10, function(s) rgbEnabled = s end)
 makeToggle(settingsPage, "FPS Sayaci", 50, function(s) showFps = s; fpsLbl.Visible = s end)
 
-local pages = {Player = playerPage, ESP = espPage, Aimbot = aimbotPage, Emote = emotePage, Troll = trollPage, Ayarlar = settingsPage}
+local pages = {Player = playerPage, ESP = espPage, Aimbot = aimbotPage, Emote = emotePage, Ayarlar = settingsPage}
 local activeTab = "Player"
 local function showPage(name)
     activeTab = name
@@ -760,11 +790,11 @@ showPage("Player")
 task.spawn(function()
     local frames = 0
     while true do
-        task.wait(0.05) -- Saniyede 20 kez güncelle (Akıcı ve kasmaz)
+        task.wait(0.03)
         frames = frames + 1
         
-        if showFps and frames >= 20 then
-            fpsLbl.Text = tostring(math.floor(frames / 0.05)) .. " FPS"
+        if showFps and frames >= 33 then
+            fpsLbl.Text = tostring(math.floor(frames / 0.03)) .. " FPS"
             frames = 0
         end
         
@@ -774,7 +804,7 @@ task.spawn(function()
             Title.BackgroundColor3 = col
         end
 
-        -- 2D ESP GÜNCELLEME
+        -- 2D ESP GÜNCELLEME (Kusursuz Görünürlük)
         if espEnabled then
             local _, myPos = safeCharacter()
             if myPos then
@@ -786,41 +816,73 @@ task.spawn(function()
                         local hum = char:FindFirstChildOfClass("Humanoid")
                         local head = char:FindFirstChild("Head")
                         local hrp = char:FindFirstChild("HumanoidRootPart")
+                        local data = espData[p]
                         
-                        if hum and hum.Health > 0 and head and hrp then
-                            local dist = (hrp.Position - myPos.Position).Magnitude
-                            local data = espData[p]
-                            
-                            if dist <= espMaxDistance then
-                                local headScreen, onScreen1 = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
-                                local footScreen, onScreen2 = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 2.5, 0))
+                        if data then
+                            if hum and hum.Health > 0 and head and hrp then
+                                local dist = (hrp.Position - myPos.Position).Magnitude
                                 
-                                if onScreen1 or onScreen2 then
-                                    local height = math.abs(headScreen.Y - footScreen.Y)
-                                    local width = height * 0.6
+                                if dist <= espMaxDistance then
+                                    local headScreen, onScreen1 = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
+                                    local footScreen, onScreen2 = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 2.5, 0))
                                     
-                                    data.frame.Visible = true
-                                    data.frame.Size = UDim2.new(0, width, 0, height)
-                                    data.frame.Position = UDim2.new(0, headScreen.X - width/2, 0, headScreen.Y)
-                                    data.stroke.Color = isPlayerVisible(char) and espVisibleColor or espHiddenColor
-                                    
-                                    data.nameLabel.Visible = true
-                                    data.nameLabel.Position = UDim2.new(0, headScreen.X - 50, 0, headScreen.Y - 20)
-                                    data.nameLabel.Size = UDim2.new(0, 100, 0, 15)
-                                    
-                                    data.distLabel.Visible = true
-                                    data.distLabel.Position = UDim2.new(0, headScreen.X - 50, 0, headScreen.Y + height + 2)
-                                    data.distLabel.Size = UDim2.new(0, 100, 0, 15)
-                                    data.distLabel.Text = "[" .. math.floor(dist) .. "m]"
+                                    if onScreen1 or onScreen2 then
+                                        local height = math.abs(headScreen.Y - footScreen.Y)
+                                        local width = height * 0.6
+                                        
+                                        -- ESP KUTUSU
+                                        data.box.Visible = true
+                                        data.box.Size = UDim2.new(0, width, 0, height)
+                                        data.box.Position = UDim2.new(0, headScreen.X - width/2, 0, headScreen.Y)
+                                        
+                                        -- RENK MANTIĞI: GÖRÜNÜRSE YEŞİL, DEĞİLSE KIRMIZI
+                                        local visible = isPlayerVisible(char)
+                                        local color = visible and espVisibleColor or espHiddenColor
+                                        data.stroke.Color = color
+                                        
+                                        -- İSİM
+                                        data.nameLabel.Visible = espShowName
+                                        if espShowName then
+                                            data.nameLabel.Position = UDim2.new(0, headScreen.X - 50, 0, headScreen.Y - 18)
+                                            data.nameLabel.Size = UDim2.new(0, 100, 0, 15)
+                                            data.nameLabel.TextColor3 = color
+                                        end
+                                        
+                                        -- MESAFE
+                                        data.distLabel.Visible = espShowDistance
+                                        if espShowDistance then
+                                            data.distLabel.Position = UDim2.new(0, headScreen.X - 50, 0, headScreen.Y + height + 2)
+                                            data.distLabel.Size = UDim2.new(0, 100, 0, 15)
+                                            data.distLabel.Text = "[" .. math.floor(dist) .. "m]"
+                                            data.distLabel.TextColor3 = color
+                                        end
+                                        
+                                        -- CAN BARI
+                                        data.hpBarBg.Visible = espShowHealth
+                                        if espShowHealth then
+                                            local hpPct = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+                                            data.hpFill.Size = UDim2.new(1, 0, hpPct, 0)
+                                            -- Can azaldıkça Kırmızıya döner
+                                            data.hpFill.BackgroundColor3 = Color3.fromRGB(math.floor(255 * (1 - hpPct)), math.floor(255 * hpPct), 0)
+                                        end
+                                        
+                                    else
+                                        data.box.Visible = false
+                                        data.nameLabel.Visible = false
+                                        data.distLabel.Visible = false
+                                        data.hpBarBg.Visible = false
+                                    end
                                 else
-                                    data.frame.Visible = false
+                                    data.box.Visible = false
                                     data.nameLabel.Visible = false
                                     data.distLabel.Visible = false
+                                    data.hpBarBg.Visible = false
                                 end
                             else
-                                data.frame.Visible = false
+                                data.box.Visible = false
                                 data.nameLabel.Visible = false
                                 data.distLabel.Visible = false
+                                data.hpBarBg.Visible = false
                             end
                         end
                     end
@@ -862,7 +924,10 @@ UserInputService.InputBegan:Connect(function(input, gp)
         return
     end
     for id, kb in pairs(keybinds) do
-        if id ~= "menu" and kb.key == input.KeyCode and kb.callback then kb.callback() break end
+        if id ~= "menu" and kb.key and kb.key == input.KeyCode and kb.callback then 
+            kb.callback() 
+            break 
+        end
     end
 end)
 
@@ -875,4 +940,4 @@ LocalPlayer.CharacterAdded:Connect(function()
     if spinEnabled then toggleSpin(true) end
 end)
 
-print("STRXcahts v18 | FOV Circle Added | 2D ESP | Mouse Aimbot")
+print("STRXcahts v20 | Kusursuz ESP | Renk Mantigi Duzeltildi | Troll Menusu Kaldirildi")
