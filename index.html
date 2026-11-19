@@ -1,4 +1,4 @@
--- STRXcahts v31-BOT2 | per-system bot detect toggle
+-- STRXcahts v32-HBOT | hitbox bot support
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 local Players           = game:GetService("Players")
@@ -33,10 +33,11 @@ local rgbEnabled = true
 local rgbHue = 0
 local showFps = true
 local hitboxEnabled, hitboxSize = false, 5
+local hitboxBotDetect = false       -- YENİ
 local camFovEnabled, camFovValue = false, 70
 local espEnabled = false
 local espShowName, espShowHealth, espShowDistance = true, true, true
-local espBotDetect = false          -- YENİ
+local espBotDetect = false
 local espVisibleColor = Color3.fromRGB(0, 255, 100)
 local espHiddenColor  = Color3.fromRGB(255, 60, 60)
 local espMaxDistance  = 1000
@@ -48,7 +49,7 @@ local aimbotSmoothness = 3
 local aimbotWallCheck = true
 local aimbotAimPart = "Head"
 local aimbotTarget = nil
-local aimbotBotDetect = false       -- YENİ
+local aimbotBotDetect = false
 local showFOVCircle = true
 local savedPosition = nil
 local flyBV, flyBG, flyConn
@@ -71,7 +72,7 @@ local tpAuraKeybind = nil
 local lookTpKeybind = nil
 local listeningForTpAuraKey = false
 local listeningForLookTpKey = false
-local tpAuraBotDetect = false       -- YENİ
+local tpAuraBotDetect = false
 
 -- ============ BOT/MONSTER CACHE ============
 local botCache = {}
@@ -309,7 +310,6 @@ local function goBack()
     if savedPosition then teleportCharacterTo(savedPosition); savedPosition = nil end
 end
 
--- TP Aura (bot detect dahil)
 local function randomPlayerTp()
     local _, myHrp = safeCharacter()
     if not myHrp then return end
@@ -359,24 +359,35 @@ local function lookTp()
     end
 end
 
--- ============ HITBOX ============
+-- ============ HITBOX (BOT DESTEKLİ) ============
 local function hitboxLoop()
     if hitboxLoopActive then return end
     hitboxLoopActive = true
     while hitboxEnabled do
+        -- Hedef listesi: oyuncular + (toggle açıksa) botlar
+        local targets = {}
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LocalPlayer and p.Character then
-                for _, name in ipairs({"Head","HumanoidRootPart","UpperTorso","Torso","LowerTorso"}) do
-                    local part = p.Character:FindFirstChild(name)
-                    if part then
-                        if not originalSizes[part] then originalSizes[part] = part.Size end
-                        local s = originalSizes[part]
-                        pcall(function()
-                            part.Size = Vector3.new(math.max(s.X, hitboxSize),
-                                                   math.max(s.Y, hitboxSize),
-                                                   math.max(s.Z, hitboxSize))
-                        end)
-                    end
+                table.insert(targets, p.Character)
+            end
+        end
+        if hitboxBotDetect then
+            refreshBotCache()
+            for _, model in ipairs(botCache) do
+                table.insert(targets, model)
+            end
+        end
+        for _, char in ipairs(targets) do
+            for _, name in ipairs({"Head","HumanoidRootPart","UpperTorso","Torso","LowerTorso"}) do
+                local part = char:FindFirstChild(name)
+                if part then
+                    if not originalSizes[part] then originalSizes[part] = part.Size end
+                    local s = originalSizes[part]
+                    pcall(function()
+                        part.Size = Vector3.new(math.max(s.X, hitboxSize),
+                                               math.max(s.Y, hitboxSize),
+                                               math.max(s.Z, hitboxSize))
+                    end)
                 end
             end
         end
@@ -858,11 +869,9 @@ makeToggle(espPage, "Can Goster", 90, function(s) espShowHealth = s end)
 makeToggle(espPage, "Mesafe Goster", 130, function(s) espShowDistance = s end)
 makeSlider(espPage, "Max Mesafe", 50, 3000, espMaxDistance, 170, function(v) espMaxDistance = v end)
 
--- YENİ: ESP Bot Detect toggle
 makeToggle(espPage, "Botlari Algila", 230, function(s)
     espBotDetect = s
     if not s then
-        -- botları temizle (oyuncular kalsın)
         for model, _ in pairs(espData) do
             if not Players:GetPlayerFromCharacter(model) then
                 removeESPForModel(model)
@@ -979,8 +988,8 @@ sfBtn.MouseButton1Click:Connect(function()
     sfBtn.BackgroundColor3 = showFOVCircle and Color3.fromRGB(0,180,90) or Color3.fromRGB(255,140,0)
 end)
 
--- YENİ: Aimbot Bot Detect toggle
-makeToggle(aimbotPage, "Botlari Algila", 364, function(s) aimbotBotDetect = s end)
+makeToggle(aimbotPage, "Botlari Algila (Aimbot)", 364, function(s) aimbotBotDetect = s end)
+makeToggle(aimbotPage, "Hitbox Botlari Algila", 404, function(s) hitboxBotDetect = s end) -- YENİ
 
 -- TP
 local tpAuraKbBtn = makeKeybindAction(tpPage, "TP Aura (Rastgele)", 10)
@@ -997,7 +1006,6 @@ end)
 
 makeButton(tpPage, "Geri Don (Son Isinlanmadan)", 8, 100, 320, 35, Color3.fromRGB(200,100,60), goBack)
 
--- YENİ: TP Aura Bot Detect toggle
 makeToggle(tpPage, "Botlari Algila (TP Aura)", 145, function(s) tpAuraBotDetect = s end)
 
 local tpInfo = Instance.new("TextLabel", tpPage)
@@ -1217,7 +1225,7 @@ task.spawn(function()
     end
 end)
 
--- ESP loop (conditional bots)
+-- ESP loop
 task.spawn(function()
     while true do
         task.wait(espEnabled and 0.05 or 0.4)
@@ -1274,7 +1282,6 @@ task.spawn(function()
                                         data.distLabel.Text = "["..math.floor(dist).."m]"
                                         data.distLabel.TextColor3 = color
                                     end
-                                    -- Can barı sadece Humanoid varsa
                                     data.hpBarBg.Visible = espShowHealth and (hum ~= nil)
                                     if espShowHealth and hum then
                                         local hpPct = math.clamp(hum.Health/hum.MaxHealth, 0, 1)
@@ -1295,7 +1302,6 @@ task.spawn(function()
                         end
                     end
                 end
-                -- orphan cleanup
                 for model, _ in pairs(espData) do
                     if not seen[model] then
                         removeESPForModel(model)
@@ -1367,4 +1373,4 @@ end)
 
 captureOriginal(LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait())
 
-print("STRXcahts v31-BOT2 | per-system bot detect + monster support")
+print("STRXcahts v32-HBOT | hitbox bot support enabled")
