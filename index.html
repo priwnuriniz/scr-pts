@@ -1,4 +1,4 @@
--- STRXcahts v32-HBOT | hitbox bot support
+-- STRXcahts v32-HBOT-IRON | v32 + Iron Man Fly + Cyberpunk Menu
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 local Players           = game:GetService("Players")
@@ -20,6 +20,17 @@ local function getGuiParent()
 end
 local guiParent = getGuiParent()
 
+-- ============ THEME (CYBERPUNK) ============
+local THEME = {
+    bg = Color3.fromRGB(10, 14, 26),
+    surface = Color3.fromRGB(18, 25, 42),
+    surfaceAlt = Color3.fromRGB(24, 32, 52),
+    primary = Color3.fromRGB(0, 212, 255),
+    secondary = Color3.fromRGB(255, 215, 0),
+    text = Color3.fromRGB(255, 255, 255),
+    textDim = Color3.fromRGB(138, 155, 168),
+}
+
 -- ============ STATE ============
 local flyEnabled, flySpeed = false, 50
 local walkSpeedEnabled, walkSpeedValue = false, 30
@@ -29,11 +40,11 @@ local noclipEnabled = false
 local infiniteJumpEnabled = false
 local antiAfkEnabled = false
 local clickTpEnabled = false
-local rgbEnabled = true
-local rgbHue = 0
+local rgbEnabled = false
+local rgbHue = 0.55
 local showFps = true
 local hitboxEnabled, hitboxSize = false, 5
-local hitboxBotDetect = false       -- YENİ
+local hitboxBotDetect = false
 local camFovEnabled, camFovValue = false, 70
 local espEnabled = false
 local espShowName, espShowHealth, espShowDistance = true, true, true
@@ -53,6 +64,7 @@ local aimbotBotDetect = false
 local showFOVCircle = true
 local savedPosition = nil
 local flyBV, flyBG, flyConn
+local thrusterAtt = nil
 local noclipConn
 local spinAV
 local toggleSync = {}
@@ -191,11 +203,66 @@ local function isPlayerVisible(targetChar)
     return r == nil
 end
 
--- ============ FLY ============
+-- ============ THRUSTER (YENİ) ============
+local function createThruster(hrp)
+    local att = Instance.new("Attachment")
+    att.Name = "STRX_ThrusterAtt"
+    att.Position = Vector3.new(0, -2.8, 0)
+    att.Parent = hrp
+    local fire = Instance.new("ParticleEmitter")
+    fire.Texture = "rbxasset://textures/particles/fire_main.dds"
+    fire.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+        ColorSequenceKeypoint.new(0.25, Color3.fromRGB(255, 220, 100)),
+        ColorSequenceKeypoint.new(0.55, Color3.fromRGB(255, 140, 20)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 30, 0))
+    }
+    fire.Size = NumberSequence.new{
+        NumberSequenceKeypoint.new(0, 1.6),
+        NumberSequenceKeypoint.new(0.5, 1.0),
+        NumberSequenceKeypoint.new(1, 0)
+    }
+    fire.Transparency = NumberSequence.new{
+        NumberSequenceKeypoint.new(0, 0.15),
+        NumberSequenceKeypoint.new(1, 1)
+    }
+    fire.Lifetime = NumberRange.new(0.25, 0.5)
+    fire.Rate = 130
+    fire.Speed = NumberRange.new(12, 22)
+    fire.SpreadAngle = Vector2.new(8, 8)
+    fire.Acceleration = Vector3.new(0, -45, 0)
+    fire.LightEmission = 0.9
+    fire.LightInfluence = 0
+    fire.ZOffset = -2
+    fire.Parent = att
+    local spark = Instance.new("ParticleEmitter")
+    spark.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+    spark.Color = ColorSequence.new(Color3.fromRGB(255, 230, 150))
+    spark.Size = NumberSequence.new(0.35)
+    spark.Transparency = NumberSequence.new(0.4)
+    spark.Lifetime = NumberRange.new(0.4, 0.8)
+    spark.Rate = 40
+    spark.Speed = NumberRange.new(4, 8)
+    spark.SpreadAngle = Vector2.new(25, 25)
+    spark.LightEmission = 1
+    spark.LightInfluence = 0
+    spark.Parent = att
+    return att
+end
+
+local function destroyThruster()
+    if thrusterAtt then
+        pcall(function() thrusterAtt:Destroy() end)
+        thrusterAtt = nil
+    end
+end
+
+-- ============ FLY (IRON MAN) ============
 local function destroyFlyPhysics()
     if flyConn then flyConn:Disconnect() flyConn = nil end
     if flyBV then flyBV:Destroy() flyBV = nil end
     if flyBG then flyBG:Destroy() flyBG = nil end
+    destroyThruster()
 end
 
 local function startFly()
@@ -215,6 +282,7 @@ local function startFly()
     flyBG.P = 3000
     flyBG.D = 100
     flyBG.Parent = hrp
+    thrusterAtt = createThruster(hrp)
     flyConn = RunService.RenderStepped:Connect(function(dt)
         if not flyEnabled then return end
         local _, r = safeCharacter()
@@ -233,7 +301,17 @@ local function startFly()
             local look = camCF.LookVector
             local flat = Vector3.new(look.X, 0, look.Z)
             if flat.Magnitude > 0.01 then
-                flyBG.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit)
+                local cf = CFrame.lookAt(r.Position, r.Position + flat.Unit)
+                -- Iron Man öne yatma
+                local horizDir = Vector3.new(dir.X, 0, dir.Z)
+                if horizDir.Magnitude > 0.1 then
+                    local dot = horizDir.Unit:Dot(flat.Unit)
+                    if dot > 0 then
+                        local leanAngle = math.rad(-25) * dot * math.min(1, horizDir.Magnitude / flySpeed)
+                        cf = cf * CFrame.Angles(leanAngle, 0, 0)
+                    end
+                end
+                flyBG.CFrame = cf
             end
         end
     end)
@@ -359,12 +437,11 @@ local function lookTp()
     end
 end
 
--- ============ HITBOX (BOT DESTEKLİ) ============
+-- ============ HITBOX ============
 local function hitboxLoop()
     if hitboxLoopActive then return end
     hitboxLoopActive = true
     while hitboxEnabled do
-        -- Hedef listesi: oyuncular + (toggle açıksa) botlar
         local targets = {}
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LocalPlayer and p.Character then
@@ -408,6 +485,7 @@ local function cleanup()
     if flyBV then pcall(function() flyBV:Destroy() end) flyBV = nil end
     if flyBG then pcall(function() flyBG:Destroy() end) flyBG = nil end
     if spinAV then pcall(function() spinAV:Destroy() end) spinAV = nil end
+    pcall(destroyThruster)
     pcall(function() RunService:UnbindFromRenderStep("STRX_Aimbot_Move") end)
     for _, name in ipairs({"STRXcahtsMenu","STRX_ESPGui","STRX_FOVGui","STRX_Watermark"}) do
         local g = guiParent:FindFirstChild(name)
@@ -443,23 +521,24 @@ FOVFrame.BackgroundTransparency = 1
 FOVFrame.Visible = false
 Instance.new("UICorner", FOVFrame).CornerRadius = UDim.new(1, 0)
 local FOVStroke = Instance.new("UIStroke", FOVFrame)
-FOVStroke.Color = Color3.fromRGB(0, 255, 100)
+FOVStroke.Color = THEME.primary
 FOVStroke.Thickness = 2
 
+-- Watermark (cooler)
 local wmFrame = Instance.new("Frame", WatermarkGui)
-wmFrame.Size = UDim2.new(0, 180, 0, 25)
-wmFrame.Position = UDim2.new(1, -190, 0, 10)
-wmFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
-wmFrame.BackgroundTransparency = 0.3
-Instance.new("UICorner", wmFrame).CornerRadius = UDim.new(0, 4)
+wmFrame.Size = UDim2.new(0, 210, 0, 28)
+wmFrame.Position = UDim2.new(1, -220, 0, 10)
+wmFrame.BackgroundColor3 = THEME.bg
+wmFrame.BackgroundTransparency = 0.2
+Instance.new("UICorner", wmFrame).CornerRadius = UDim.new(0, 6)
 local wmStroke = Instance.new("UIStroke", wmFrame)
-wmStroke.Color = Color3.fromRGB(255, 140, 0)
-wmStroke.Thickness = 1
+wmStroke.Color = THEME.primary
+wmStroke.Thickness = 1.2
 local wmText = Instance.new("TextLabel", wmFrame)
 wmText.Size = UDim2.new(1, 0, 1, 0)
 wmText.BackgroundTransparency = 1
 wmText.Text = "STRXCHATS | 60 FPS"
-wmText.TextColor3 = Color3.new(1,1,1)
+wmText.TextColor3 = THEME.primary
 wmText.Font = Enum.Font.GothamBold
 wmText.TextSize = 12
 
@@ -519,7 +598,6 @@ local function getAimbotTarget()
     local center = Camera.ViewportSize / 2
     local myChar = LocalPlayer.Character
     if not myChar then return nil end
-
     local allChars = {}
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character then
@@ -532,7 +610,6 @@ local function getAimbotTarget()
             table.insert(allChars, model)
         end
     end
-
     for _, char in ipairs(allChars) do
         local hum = char:FindFirstChildOfClass("Humanoid")
         local alive = (hum == nil) or (hum.Health > 0)
@@ -562,55 +639,50 @@ end
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 680, 0, 540)
 MainFrame.Position = UDim2.new(0.5, -340, 0.5, -270)
-MainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+MainFrame.BackgroundColor3 = THEME.bg
+MainFrame.BackgroundTransparency = 0.05
 MainFrame.Active = true
 MainFrame.Draggable = true
 MainFrame.ClipsDescendants = true
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 14)
 local mainStroke = Instance.new("UIStroke", MainFrame)
-mainStroke.Color = Color3.fromRGB(255, 140, 0)
+mainStroke.Color = THEME.primary
 mainStroke.Thickness = 1.5
-
-local bgImage = Instance.new("ImageLabel", MainFrame)
-bgImage.Size = UDim2.new(1,0,1,0)
-bgImage.BackgroundTransparency = 1
-bgImage.Image = "rbxassetid://10149736922"
-bgImage.ImageTransparency = 0.85
-bgImage.ScaleType = Enum.ScaleType.Crop
-bgImage.ZIndex = 0
-Instance.new("UICorner", bgImage).CornerRadius = UDim.new(0, 14)
+mainStroke.Transparency = 0.2
 
 local bgLogo = Instance.new("TextLabel", MainFrame)
 bgLogo.Size = UDim2.new(1,0,1,0)
 bgLogo.BackgroundTransparency = 1
-bgLogo.Text = "STRXCHATS"
-bgLogo.TextColor3 = Color3.new(1,1,1)
-bgLogo.TextTransparency = 0.85
+bgLogo.Text = "STRX"
+bgLogo.TextColor3 = THEME.primary
+bgLogo.TextTransparency = 0.92
 bgLogo.Font = Enum.Font.GothamBlack
-bgLogo.TextSize = 120
-bgLogo.ZIndex = 1
+bgLogo.TextSize = 200
+bgLogo.ZIndex = 0
 
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1,0,0,50)
-Title.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
+Title.BackgroundColor3 = THEME.surface
 Title.Text = "  STRXCHATS  |  Insert = Ac/Kapat"
-Title.TextColor3 = Color3.new(1,1,1)
+Title.TextColor3 = THEME.primary
 Title.Font = Enum.Font.GothamBlack
-Title.TextSize = 18
+Title.TextSize = 17
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.ZIndex = 2
 Instance.new("UICorner", Title).CornerRadius = UDim.new(0, 14)
-local titleGlow = Instance.new("UIStroke", Title)
-titleGlow.Color = Color3.new(1,1,1)
-titleGlow.Thickness = 2
-titleGlow.Transparency = 0.2
+local titleBottom = Instance.new("Frame", Title)
+titleBottom.Size = UDim2.new(1,0,0,2)
+titleBottom.Position = UDim2.new(0,0,1,-1)
+titleBottom.BackgroundColor3 = THEME.primary
+titleBottom.BorderSizePixel = 0
+titleBottom.ZIndex = 3
 
 local fpsLbl = Instance.new("TextLabel", Title)
 fpsLbl.Size = UDim2.new(0,100,1,0)
 fpsLbl.Position = UDim2.new(1,-110,0,0)
 fpsLbl.BackgroundTransparency = 1
 fpsLbl.Text = "60 FPS"
-fpsLbl.TextColor3 = Color3.new(1,1,1)
+fpsLbl.TextColor3 = THEME.secondary
 fpsLbl.Font = Enum.Font.GothamBold
 fpsLbl.TextSize = 12
 fpsLbl.TextXAlignment = Enum.TextXAlignment.Right
@@ -630,9 +702,9 @@ tabLay.Padding = UDim.new(0,5)
 for _, name in ipairs(tabNames) do
     local btn = Instance.new("TextButton", tabHolder)
     btn.Size = UDim2.new(0,80,1,0)
-    btn.BackgroundColor3 = Color3.fromRGB(38,38,45)
+    btn.BackgroundColor3 = THEME.surfaceAlt
     btn.Text = name
-    btn.TextColor3 = Color3.new(1,1,1)
+    btn.TextColor3 = THEME.textDim
     btn.Font = Enum.Font.GothamBold
     btn.TextSize = 11
     btn.AutoButtonColor = false
@@ -644,8 +716,8 @@ end
 local content = Instance.new("Frame", MainFrame)
 content.Size = UDim2.new(1,-30,1,-145)
 content.Position = UDim2.new(0,15,0,102)
-content.BackgroundColor3 = Color3.fromRGB(14,14,18)
-content.BackgroundTransparency = 0.25
+content.BackgroundColor3 = THEME.surface
+content.BackgroundTransparency = 0.15
 content.ZIndex = 2
 Instance.new("UICorner", content).CornerRadius = UDim.new(0,10)
 
@@ -653,7 +725,7 @@ local function makeToggle(parent, text, y, callback, keybindId, syncId)
     local f = Instance.new("Frame", parent)
     f.Size = UDim2.new(0,320,0,34)
     f.Position = UDim2.new(0,8,0,y)
-    f.BackgroundColor3 = Color3.fromRGB(28,28,36)
+    f.BackgroundColor3 = THEME.surfaceAlt
     f.ZIndex = 2
     Instance.new("UICorner", f).CornerRadius = UDim.new(0,7)
     local lbl = Instance.new("TextLabel", f)
@@ -661,7 +733,7 @@ local function makeToggle(parent, text, y, callback, keybindId, syncId)
     lbl.Position = UDim2.new(0,12,0,0)
     lbl.BackgroundTransparency = 1
     lbl.Text = text
-    lbl.TextColor3 = Color3.new(1,1,1)
+    lbl.TextColor3 = THEME.text
     lbl.Font = Enum.Font.Gotham
     lbl.TextSize = 13
     lbl.TextXAlignment = Enum.TextXAlignment.Left
@@ -669,708 +741,3 @@ local function makeToggle(parent, text, y, callback, keybindId, syncId)
     local kbBtn = nil
     if keybindId and keybinds[keybindId] then
         kbBtn = Instance.new("TextButton", f)
-        kbBtn.Size = UDim2.new(0,54,0,22)
-        kbBtn.Position = UDim2.new(1,-118,0.5,-11)
-        kbBtn.BackgroundColor3 = Color3.fromRGB(45,45,55)
-        kbBtn.Text = keybinds[keybindId].key and keybinds[keybindId].key.Name or "Yok"
-        kbBtn.TextColor3 = Color3.new(1,1,1)
-        kbBtn.Font = Enum.Font.GothamBold
-        kbBtn.TextSize = 10
-        kbBtn.ZIndex = 2
-        Instance.new("UICorner", kbBtn).CornerRadius = UDim.new(0,5)
-        kbBtn.MouseButton1Click:Connect(function() listeningForBind = keybindId; kbBtn.Text = "..." end)
-        keybindButtons[keybindId] = kbBtn
-    end
-    local onBtn = Instance.new("TextButton", f)
-    onBtn.Size = UDim2.new(0,44,0,22)
-    onBtn.Position = UDim2.new(1,-54,0.5,-11)
-    onBtn.BackgroundColor3 = Color3.fromRGB(255,140,0)
-    onBtn.Text = "OFF"
-    onBtn.TextColor3 = Color3.new(1,1,1)
-    onBtn.Font = Enum.Font.GothamBold
-    onBtn.TextSize = 11
-    onBtn.ZIndex = 2
-    Instance.new("UICorner", onBtn).CornerRadius = UDim.new(0,5)
-    local on = false
-    local function setVisual(v)
-        on = v
-        onBtn.Text = v and "ON" or "OFF"
-        TweenService:Create(onBtn, TweenInfo.new(0.2), {
-            BackgroundColor3 = v and Color3.fromRGB(0,180,90) or Color3.fromRGB(255,140,0)
-        }):Play()
-    end
-    local function doToggle()
-        setVisual(not on)
-        callback(on)
-    end
-    onBtn.MouseButton1Click:Connect(doToggle)
-    if keybindId and keybinds[keybindId] then keybinds[keybindId].callback = doToggle end
-    if syncId then toggleSync[syncId] = {setVisual = setVisual, getState = function() return on end} end
-    return {setVisual = setVisual, getState = function() return on end, button = onBtn}
-end
-
-local function makeKeybindAction(parent, text, y)
-    local f = Instance.new("Frame", parent)
-    f.Size = UDim2.new(0,320,0,34)
-    f.Position = UDim2.new(0,8,0,y)
-    f.BackgroundColor3 = Color3.fromRGB(28,28,36)
-    f.ZIndex = 2
-    Instance.new("UICorner", f).CornerRadius = UDim.new(0,7)
-    local lbl = Instance.new("TextLabel", f)
-    lbl.Size = UDim2.new(1,-130,1,0)
-    lbl.Position = UDim2.new(0,12,0,0)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = text
-    lbl.TextColor3 = Color3.new(1,1,1)
-    lbl.Font = Enum.Font.Gotham
-    lbl.TextSize = 13
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.ZIndex = 2
-    local kbBtn = Instance.new("TextButton", f)
-    kbBtn.Size = UDim2.new(0,100,0,22)
-    kbBtn.Position = UDim2.new(1,-112,0.5,-11)
-    kbBtn.BackgroundColor3 = Color3.fromRGB(45,45,55)
-    kbBtn.Text = "Ata"
-    kbBtn.TextColor3 = Color3.new(1,1,1)
-    kbBtn.Font = Enum.Font.GothamBold
-    kbBtn.TextSize = 10
-    kbBtn.ZIndex = 2
-    Instance.new("UICorner", kbBtn).CornerRadius = UDim.new(0,5)
-    return kbBtn
-end
-
-local function makeSlider(parent, labelText, minV, maxV, default, y, onChanged)
-    local holder = Instance.new("Frame", parent)
-    holder.Size = UDim2.new(0,320,0,48)
-    holder.Position = UDim2.new(0,8,0,y)
-    holder.BackgroundColor3 = Color3.fromRGB(28,28,36)
-    holder.ZIndex = 2
-    Instance.new("UICorner", holder).CornerRadius = UDim.new(0,7)
-    local lbl = Instance.new("TextLabel", holder)
-    lbl.Size = UDim2.new(1,-20,0,18)
-    lbl.Position = UDim2.new(0,12,0,5)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = labelText..": "..default
-    lbl.TextColor3 = Color3.new(1,1,1)
-    lbl.Font = Enum.Font.Gotham
-    lbl.TextSize = 12
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.ZIndex = 2
-    local barBg = Instance.new("Frame", holder)
-    barBg.Size = UDim2.new(1,-24,0,7)
-    barBg.Position = UDim2.new(0,12,1,-14)
-    barBg.BackgroundColor3 = Color3.fromRGB(50,50,60)
-    barBg.ZIndex = 2
-    Instance.new("UICorner", barBg).CornerRadius = UDim.new(1,0)
-    local fill = Instance.new("Frame", barBg)
-    fill.Size = UDim2.new((default-minV)/(maxV-minV),0,1,0)
-    fill.BackgroundColor3 = Color3.fromRGB(255,140,0)
-    fill.ZIndex = 2
-    Instance.new("UICorner", fill).CornerRadius = UDim.new(1,0)
-    local knob = Instance.new("Frame", barBg)
-    knob.Size = UDim2.new(0,14,0,14)
-    knob.Position = UDim2.new((default-minV)/(maxV-minV),-7,0.5,-7)
-    knob.BackgroundColor3 = Color3.new(1,1,1)
-    knob.ZIndex = 3
-    Instance.new("UICorner", knob).CornerRadius = UDim.new(1,0)
-    local function upd(x)
-        local rel = math.clamp((x - barBg.AbsolutePosition.X) / math.max(barBg.AbsoluteSize.X,1), 0, 1)
-        local v = math.floor(minV + rel * (maxV - minV))
-        fill.Size = UDim2.new(rel,0,1,0)
-        knob.Position = UDim2.new(rel,-7,0.5,-7)
-        lbl.Text = labelText..": "..v
-        onChanged(v)
-    end
-    local function beginDrag(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-            activeSlider = upd
-            upd(i.Position.X)
-        end
-    end
-    barBg.InputBegan:Connect(beginDrag)
-    fill.InputBegan:Connect(beginDrag)
-    knob.InputBegan:Connect(beginDrag)
-end
-
-local function makeButton(parent, text, x, y, w, h, color, callback)
-    local btn = Instance.new("TextButton", parent)
-    btn.Size = UDim2.new(0,w,0,h)
-    btn.Position = UDim2.new(0,x,0,y)
-    btn.BackgroundColor3 = color
-    btn.Text = text
-    btn.TextColor3 = Color3.new(1,1,1)
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 12
-    btn.AutoButtonColor = false
-    btn.ZIndex = 3
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,7)
-    btn.MouseButton1Click:Connect(callback)
-    return btn
-end
-
-local function makePage()
-    local p = Instance.new("ScrollingFrame", content)
-    p.Size = UDim2.new(1,-12,1,-12)
-    p.Position = UDim2.new(0,6,0,6)
-    p.BackgroundTransparency = 1
-    p.ScrollBarThickness = 4
-    p.ScrollBarImageColor3 = Color3.fromRGB(255,140,0)
-    p.CanvasSize = UDim2.new(0,0,0,800)
-    p.ScrollingDirection = Enum.ScrollingDirection.Y
-    p.Visible = false
-    p.ZIndex = 2
-    return p
-end
-
-local playerPage  = makePage()
-local espPage     = makePage()
-local aimbotPage  = makePage()
-local tpPage      = makePage()
-local extraPage   = makePage()
-local settingsPage= makePage()
-
--- PLAYER
-makeToggle(playerPage, "Fly (WASD)", 10, function(s) if s then startFly() else stopFly() end end, "fly", "fly")
-makeSlider(playerPage, "Fly Hizi", 1, 500, flySpeed, 48, function(v) flySpeed = v end)
-makeToggle(playerPage, "WalkSpeed Override", 100, function(s) walkSpeedEnabled = s; applyWalkSpeed() end, "walkSpeed")
-makeSlider(playerPage, "WalkSpeed", 1, 500, walkSpeedValue, 138, function(v) walkSpeedValue = v; applyWalkSpeed() end)
-makeToggle(playerPage, "JumpPower Override", 190, function(s) jumpPowerEnabled = s; applyJumpPower() end)
-makeSlider(playerPage, "JumpPower", 10, 500, jumpPowerValue, 228, function(v) jumpPowerValue = v; if jumpPowerEnabled then applyJumpPower() end end)
-makeToggle(playerPage, "Noclip", 280, function(s) toggleNoclip(s) end, "noclip")
-makeToggle(playerPage, "Sonsuz Ziplama", 320, function(s) infiniteJumpEnabled = s end, "infJump")
-makeToggle(playerPage, "Spin", 360, function(s) toggleSpin(s) end, "spin")
-makeSlider(playerPage, "Spin Hizi", 1, 200, spinSpeed, 398, function(v) spinSpeed = v; if spinAV then spinAV.AngularVelocity = Vector3.new(0,v,0) end end)
-makeButton(playerPage, "Mouse'a Isinlan", 8, 450, 155, 35, Color3.fromRGB(60,140,255), teleportToMouse)
-makeButton(playerPage, "Geri Don", 173, 450, 155, 35, Color3.fromRGB(200,100,60), goBack)
-makeToggle(playerPage, "Anti-AFK", 495, function(s) antiAfkEnabled = s end)
-
--- ESP
-makeToggle(espPage, "ESP Ac/Kapat", 10, function(s)
-    espEnabled = s
-    if s then
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer and p.Character then createESPForModel(p.Character) end
-        end
-        if espBotDetect then
-            refreshBotCache()
-            for _, model in ipairs(botCache) do createESPForModel(model) end
-        end
-    else
-        for _, data in pairs(espData) do
-            if data.box then data.box.Visible = false end
-            if data.nameLabel then data.nameLabel.Visible = false end
-            if data.distLabel then data.distLabel.Visible = false end
-            if data.hpBarBg then data.hpBarBg.Visible = false end
-        end
-    end
-end, "esp")
-makeToggle(espPage, "Isim Goster", 50, function(s) espShowName = s end)
-makeToggle(espPage, "Can Goster", 90, function(s) espShowHealth = s end)
-makeToggle(espPage, "Mesafe Goster", 130, function(s) espShowDistance = s end)
-makeSlider(espPage, "Max Mesafe", 50, 3000, espMaxDistance, 170, function(v) espMaxDistance = v end)
-
-makeToggle(espPage, "Botlari Algila", 230, function(s)
-    espBotDetect = s
-    if not s then
-        for model, _ in pairs(espData) do
-            if not Players:GetPlayerFromCharacter(model) then
-                removeESPForModel(model)
-            end
-        end
-    elseif espEnabled then
-        refreshBotCache()
-        for _, model in ipairs(botCache) do
-            if not espData[model] then createESPForModel(model) end
-        end
-    end
-end)
-
--- AIMBOT
-makeToggle(aimbotPage, "Aimbot Ac/Kapat", 10, function(s) aimbotEnabled = s; if not s then aimbotTarget = nil end end, "aimbot")
-makeSlider(aimbotPage, "FOV (Cember Boyutu)", 20, 400, aimbotFOV, 50, function(v) aimbotFOV = v end)
-makeSlider(aimbotPage, "Yumusaklik", 1, 20, aimbotSmoothness, 100, function(v) aimbotSmoothness = v end)
-makeToggle(aimbotPage, "Duvar Kontrolu", 150, function(s) aimbotWallCheck = s end)
-
-local aimKeyRow = Instance.new("Frame", aimbotPage)
-aimKeyRow.Size = UDim2.new(0,320,0,34)
-aimKeyRow.Position = UDim2.new(0,8,0,190)
-aimKeyRow.BackgroundColor3 = Color3.fromRGB(28,28,36)
-aimKeyRow.ZIndex = 2
-Instance.new("UICorner", aimKeyRow).CornerRadius = UDim.new(0,7)
-local aimKeyLbl = Instance.new("TextLabel", aimKeyRow)
-aimKeyLbl.Size = UDim2.new(1,-130,1,0)
-aimKeyLbl.Position = UDim2.new(0,12,0,0)
-aimKeyLbl.BackgroundTransparency = 1
-aimKeyLbl.Text = "Aimbot Kilitlenme Tusu"
-aimKeyLbl.TextColor3 = Color3.new(1,1,1)
-aimKeyLbl.Font = Enum.Font.Gotham
-aimKeyLbl.TextSize = 13
-aimKeyLbl.TextXAlignment = Enum.TextXAlignment.Left
-aimKeyLbl.ZIndex = 2
-local aimKeyBtn = Instance.new("TextButton", aimKeyRow)
-aimKeyBtn.Size = UDim2.new(0,100,0,22)
-aimKeyBtn.Position = UDim2.new(1,-112,0.5,-11)
-aimKeyBtn.BackgroundColor3 = Color3.fromRGB(45,45,55)
-aimKeyBtn.Text = "Sag Tik"
-aimKeyBtn.TextColor3 = Color3.new(1,1,1)
-aimKeyBtn.Font = Enum.Font.GothamBold
-aimKeyBtn.TextSize = 10
-aimKeyBtn.ZIndex = 2
-Instance.new("UICorner", aimKeyBtn).CornerRadius = UDim.new(0,5)
-aimKeyBtn.MouseButton1Click:Connect(function() listeningForAimTrigger = true; aimKeyBtn.Text = "Bekleniyor..." end)
-
-local hbRow = Instance.new("Frame", aimbotPage)
-hbRow.Size = UDim2.new(0,320,0,34)
-hbRow.Position = UDim2.new(0,8,0,230)
-hbRow.BackgroundColor3 = Color3.fromRGB(28,28,36)
-hbRow.ZIndex = 2
-Instance.new("UICorner", hbRow).CornerRadius = UDim.new(0,7)
-local hbLbl = Instance.new("TextLabel", hbRow)
-hbLbl.Size = UDim2.new(0.7,0,1,0)
-hbLbl.Position = UDim2.new(0,12,0,0)
-hbLbl.BackgroundTransparency = 1
-hbLbl.Text = "Hitbox Genisletici"
-hbLbl.TextColor3 = Color3.new(1,1,1)
-hbLbl.Font = Enum.Font.Gotham
-hbLbl.TextSize = 13
-hbLbl.TextXAlignment = Enum.TextXAlignment.Left
-hbLbl.ZIndex = 2
-local hbBtn = Instance.new("TextButton", hbRow)
-hbBtn.Size = UDim2.new(0,44,0,22)
-hbBtn.Position = UDim2.new(1,-54,0.5,-11)
-hbBtn.BackgroundColor3 = Color3.fromRGB(255,140,0)
-hbBtn.Text = "OFF"
-hbBtn.TextColor3 = Color3.new(1,1,1)
-hbBtn.Font = Enum.Font.GothamBold
-hbBtn.TextSize = 11
-hbBtn.ZIndex = 2
-Instance.new("UICorner", hbBtn).CornerRadius = UDim.new(0,5)
-hbBtn.MouseButton1Click:Connect(function()
-    hitboxEnabled = not hitboxEnabled
-    hbBtn.Text = hitboxEnabled and "ON" or "OFF"
-    TweenService:Create(hbBtn, TweenInfo.new(0.2), {
-        BackgroundColor3 = hitboxEnabled and Color3.fromRGB(0,180,90) or Color3.fromRGB(255,140,0)
-    }):Play()
-    if hitboxEnabled then task.spawn(hitboxLoop) end
-end)
-
-makeSlider(aimbotPage, "Hitbox Boyutu", 2, 15, hitboxSize, 270, function(v) hitboxSize = v end)
-
-local showFovToggle = Instance.new("Frame", aimbotPage)
-showFovToggle.Size = UDim2.new(0,320,0,34)
-showFovToggle.Position = UDim2.new(0,8,0,320)
-showFovToggle.BackgroundColor3 = Color3.fromRGB(28,28,36)
-showFovToggle.ZIndex = 2
-Instance.new("UICorner", showFovToggle).CornerRadius = UDim.new(0,7)
-local sfLbl = Instance.new("TextLabel", showFovToggle)
-sfLbl.Size = UDim2.new(0.7,0,1,0)
-sfLbl.Position = UDim2.new(0,12,0,0)
-sfLbl.BackgroundTransparency = 1
-sfLbl.Text = "FOV Cizgisini Goster"
-sfLbl.TextColor3 = Color3.new(1,1,1)
-sfLbl.Font = Enum.Font.Gotham
-sfLbl.TextSize = 13
-sfLbl.TextXAlignment = Enum.TextXAlignment.Left
-sfLbl.ZIndex = 2
-local sfBtn = Instance.new("TextButton", showFovToggle)
-sfBtn.Size = UDim2.new(0,44,0,22)
-sfBtn.Position = UDim2.new(1,-54,0.5,-11)
-sfBtn.BackgroundColor3 = Color3.fromRGB(0,180,90)
-sfBtn.Text = "ON"
-sfBtn.TextColor3 = Color3.new(1,1,1)
-sfBtn.Font = Enum.Font.GothamBold
-sfBtn.TextSize = 11
-sfBtn.ZIndex = 2
-Instance.new("UICorner", sfBtn).CornerRadius = UDim.new(0,5)
-sfBtn.MouseButton1Click:Connect(function()
-    showFOVCircle = not showFOVCircle
-    sfBtn.Text = showFOVCircle and "ON" or "OFF"
-    sfBtn.BackgroundColor3 = showFOVCircle and Color3.fromRGB(0,180,90) or Color3.fromRGB(255,140,0)
-end)
-
-makeToggle(aimbotPage, "Botlari Algila (Aimbot)", 364, function(s) aimbotBotDetect = s end)
-makeToggle(aimbotPage, "Hitbox Botlari Algila", 404, function(s) hitboxBotDetect = s end) -- YENİ
-
--- TP
-local tpAuraKbBtn = makeKeybindAction(tpPage, "TP Aura (Rastgele)", 10)
-tpAuraKbBtn.MouseButton1Click:Connect(function()
-    listeningForTpAuraKey = true
-    tpAuraKbBtn.Text = "..."
-end)
-
-local lookTpKbBtn = makeKeybindAction(tpPage, "Baktigin Yere Isinlan", 50)
-lookTpKbBtn.MouseButton1Click:Connect(function()
-    listeningForLookTpKey = true
-    lookTpKbBtn.Text = "..."
-end)
-
-makeButton(tpPage, "Geri Don (Son Isinlanmadan)", 8, 100, 320, 35, Color3.fromRGB(200,100,60), goBack)
-
-makeToggle(tpPage, "Botlari Algila (TP Aura)", 145, function(s) tpAuraBotDetect = s end)
-
-local tpInfo = Instance.new("TextLabel", tpPage)
-tpInfo.Size = UDim2.new(0,320,0,60)
-tpInfo.Position = UDim2.new(0,8,0,190)
-tpInfo.BackgroundColor3 = Color3.fromRGB(20,20,26)
-tpInfo.BackgroundTransparency = 0.3
-tpInfo.Text = "Tuş atamak için 'Ata' butonuna tıkla,\nsonra istediğin tuşa bas. Her basışta tetiklenir."
-tpInfo.TextColor3 = Color3.fromRGB(200,200,200)
-tpInfo.Font = Enum.Font.Gotham
-tpInfo.TextSize = 11
-tpInfo.TextWrapped = true
-tpInfo.ZIndex = 2
-Instance.new("UICorner", tpInfo).CornerRadius = UDim.new(0,7)
-
--- EKSTRA
-makeToggle(extraPage, "Tikla-Isinlan", 10, function(s) clickTpEnabled = s end, "clickTp")
-makeToggle(extraPage, "Kamera FOV Ac/Kapat", 50, function(s)
-    camFovEnabled = s
-    if not s then Camera.FieldOfView = 70 end
-end)
-makeSlider(extraPage, "Kamera FOV Degeri", 50, 120, camFovValue, 90, function(v)
-    camFovValue = v
-    if camFovEnabled then Camera.FieldOfView = v end
-end)
-
--- AYARLAR
-makeToggle(settingsPage, "RGB Renk Modu", 10, function(s) rgbEnabled = s end)
-makeToggle(settingsPage, "FPS Sayaci", 50, function(s) showFps = s end)
-
--- PAGE SWITCH
-local pages = {Player=playerPage, ESP=espPage, Aimbot=aimbotPage, TP=tpPage, Ekstra=extraPage, Ayarlar=settingsPage}
-local activeTab = "Player"
-local function showPage(name)
-    activeTab = name
-    for n, p in pairs(pages) do p.Visible = (n == name) end
-end
-for name, btn in pairs(tabs) do
-    btn.MouseButton1Click:Connect(function() showPage(name) end)
-end
-showPage("Player")
-
--- SLIDER GLOBAL INPUT
-track(UserInputService.InputChanged:Connect(function(i)
-    if activeSlider and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
-        activeSlider(i.Position.X)
-    end
-end))
-track(UserInputService.InputEnded:Connect(function(i)
-    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-        activeSlider = nil
-    end
-end))
-
--- INPUT
-track(UserInputService.InputBegan:Connect(function(input, gp)
-    if listeningForBind then
-        if input.UserInputType == Enum.UserInputType.Keyboard then
-            local id = listeningForBind
-            listeningForBind = nil
-            if keybinds[id] then
-                keybinds[id].key = input.KeyCode
-                if keybindButtons[id] then keybindButtons[id].Text = input.KeyCode.Name end
-            end
-        end
-        return
-    end
-    if listeningForAimTrigger then
-        listeningForAimTrigger = false
-        if input.UserInputType == Enum.UserInputType.Keyboard then
-            aimbotKey = input.KeyCode
-            aimKeyBtn.Text = input.KeyCode.Name
-        elseif input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2 then
-            aimbotKey = input.UserInputType
-            aimKeyBtn.Text = (input.UserInputType == Enum.UserInputType.MouseButton1) and "Sol Tik" or "Sag Tik"
-        end
-        return
-    end
-    if listeningForTpAuraKey then
-        if input.UserInputType == Enum.UserInputType.Keyboard then
-            tpAuraKeybind = input.KeyCode
-            tpAuraKbBtn.Text = input.KeyCode.Name
-            listeningForTpAuraKey = false
-        end
-        return
-    end
-    if listeningForLookTpKey then
-        if input.UserInputType == Enum.UserInputType.Keyboard then
-            lookTpKeybind = input.KeyCode
-            lookTpKbBtn.Text = input.KeyCode.Name
-            listeningForLookTpKey = false
-        end
-        return
-    end
-    if gp then return end
-    if tpAuraKeybind and input.KeyCode == tpAuraKeybind then
-        randomPlayerTp()
-        return
-    end
-    if lookTpKeybind and input.KeyCode == lookTpKeybind then
-        lookTp()
-        return
-    end
-    if clickTpEnabled and input.UserInputType == Enum.UserInputType.MouseButton1 and not ScreenGui.Enabled then
-        teleportToMouse()
-    end
-    if keybinds.menu.key == input.KeyCode then
-        ScreenGui.Enabled = not ScreenGui.Enabled
-        return
-    end
-    for id, kb in pairs(keybinds) do
-        if id ~= "menu" and kb.key and kb.key == input.KeyCode and kb.callback then
-            kb.callback()
-            break
-        end
-    end
-end))
-
-track(UserInputService.JumpRequest:Connect(function()
-    if infiniteJumpEnabled then
-        local _, _, hum = safeCharacter()
-        if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
-    end
-end))
-
-track(LocalPlayer.Idled:Connect(function()
-    if antiAfkEnabled then
-        pcall(function()
-            VirtualUser:CaptureController()
-            VirtualUser:ClickButton2(Vector2.new(0,0))
-            VirtualUser:MoveMouse(Vector2.new(math.random(100,200), math.random(100,200)))
-        end)
-    end
-end))
-
-track(LocalPlayer.CharacterAdded:Connect(function(char)
-    task.wait(0.35)
-    captureOriginal(char)
-    applyWalkSpeed()
-    applyJumpPower()
-    if flyEnabled then startFly() end
-    if noclipEnabled then toggleNoclip(true) end
-    if spinEnabled then toggleSpin(true) end
-end))
-
--- PLAYER HANDLERS
-local function hookPlayer(p)
-    if p == LocalPlayer then return end
-    track(p.CharacterAdded:Connect(function(char)
-        if espEnabled then
-            if espData[char] then removeESPForModel(char) end
-            task.wait(0.5)
-            createESPForModel(char)
-        end
-    end))
-    if espEnabled and p.Character then createESPForModel(p.Character) end
-end
-for _, p in ipairs(Players:GetPlayers()) do hookPlayer(p) end
-track(Players.PlayerAdded:Connect(hookPlayer))
-track(Players.PlayerRemoving:Connect(function(p)
-    if p.Character and espData[p.Character] then
-        removeESPForModel(p.Character)
-    end
-end))
-
--- LOOPS
-local fpsCounter, fpsTimer = 0, tick()
-track(RunService.RenderStepped:Connect(function()
-    fpsCounter = fpsCounter + 1
-    if tick() - fpsTimer >= 1 then
-        local cur = fpsCounter
-        fpsCounter = 0
-        fpsTimer = tick()
-        if showFps then
-            fpsLbl.Text = cur.." FPS"
-            wmText.Text = "STRXCHATS | "..cur.." FPS"
-        end
-    end
-end))
-
-track(RunService.RenderStepped:Connect(function()
-    if camFovEnabled and math.abs(Camera.FieldOfView - camFovValue) > 0.1 then
-        Camera.FieldOfView = camFovValue
-    end
-end))
-
-task.spawn(function()
-    while true do
-        task.wait(0.1)
-        local col = rgbEnabled and getRGBColor() or Color3.fromRGB(255,140,0)
-        for n, t in pairs(tabs) do
-            if n == activeTab then
-                t.BackgroundColor3 = col
-                t.TextColor3 = Color3.new(1,1,1)
-            else
-                t.BackgroundColor3 = Color3.fromRGB(38,38,45)
-                t.TextColor3 = Color3.fromRGB(220,220,220)
-            end
-        end
-        if rgbEnabled then
-            Title.TextColor3 = col
-            bgLogo.TextColor3 = col
-            bgLogo.TextTransparency = 0.75
-            wmText.TextColor3 = col
-            wmStroke.Color = col
-            FOVStroke.Color = col
-            mainStroke.Color = col
-        else
-            Title.TextColor3 = Color3.new(1,1,1)
-            bgLogo.TextColor3 = Color3.new(1,1,1)
-            bgLogo.TextTransparency = 0.85
-            wmText.TextColor3 = Color3.new(1,1,1)
-            wmStroke.Color = Color3.fromRGB(255,140,0)
-            FOVStroke.Color = Color3.fromRGB(0,255,100)
-            mainStroke.Color = Color3.fromRGB(255,140,0)
-        end
-    end
-end)
-
--- ESP loop
-task.spawn(function()
-    while true do
-        task.wait(espEnabled and 0.05 or 0.4)
-        if espEnabled then
-            local _, myPos = safeCharacter()
-            if myPos then
-                local allChars = {}
-                for _, p in ipairs(Players:GetPlayers()) do
-                    if p ~= LocalPlayer and p.Character then
-                        table.insert(allChars, p.Character)
-                    end
-                end
-                if espBotDetect then
-                    refreshBotCache()
-                    for _, model in ipairs(botCache) do
-                        table.insert(allChars, model)
-                    end
-                end
-
-                local seen = {}
-                for _, char in ipairs(allChars) do
-                    seen[char] = true
-                    if not espData[char] then createESPForModel(char) end
-                    local hum = char:FindFirstChildOfClass("Humanoid")
-                    local head = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
-                    local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head")
-                    local data = espData[char]
-                    if data then
-                        local alive = (hum == nil) or (hum.Health > 0)
-                        if alive and head and hrp then
-                            local dist = (hrp.Position - myPos.Position).Magnitude
-                            if dist <= espMaxDistance then
-                                local headScreen, on1 = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
-                                local footScreen, on2 = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 2.5, 0))
-                                if on1 or on2 then
-                                    local height = math.abs(headScreen.Y - footScreen.Y)
-                                    local width = height * 0.6
-                                    data.box.Visible = true
-                                    data.box.Size = UDim2.new(0, width, 0, height)
-                                    data.box.Position = UDim2.new(0, headScreen.X - width/2, 0, headScreen.Y)
-                                    local visible = isPlayerVisible(char)
-                                    local color = visible and espVisibleColor or espHiddenColor
-                                    data.stroke.Color = color
-                                    data.nameLabel.Visible = espShowName
-                                    if espShowName then
-                                        data.nameLabel.Position = UDim2.new(0, headScreen.X - 60, 0, headScreen.Y - 18)
-                                        data.nameLabel.Size = UDim2.new(0, 120, 0, 15)
-                                        data.nameLabel.TextColor3 = color
-                                    end
-                                    data.distLabel.Visible = espShowDistance
-                                    if espShowDistance then
-                                        data.distLabel.Position = UDim2.new(0, headScreen.X - 60, 0, headScreen.Y + height + 2)
-                                        data.distLabel.Size = UDim2.new(0, 120, 0, 15)
-                                        data.distLabel.Text = "["..math.floor(dist).."m]"
-                                        data.distLabel.TextColor3 = color
-                                    end
-                                    data.hpBarBg.Visible = espShowHealth and (hum ~= nil)
-                                    if espShowHealth and hum then
-                                        local hpPct = math.clamp(hum.Health/hum.MaxHealth, 0, 1)
-                                        data.hpFill.Size = UDim2.new(1,0,hpPct,0)
-                                        data.hpFill.BackgroundColor3 = Color3.fromRGB(math.floor(255*(1-hpPct)), math.floor(255*hpPct), 0)
-                                    end
-                                else
-                                    data.box.Visible=false; data.nameLabel.Visible=false
-                                    data.distLabel.Visible=false; data.hpBarBg.Visible=false
-                                end
-                            else
-                                data.box.Visible=false; data.nameLabel.Visible=false
-                                data.distLabel.Visible=false; data.hpBarBg.Visible=false
-                            end
-                        else
-                            data.box.Visible=false; data.nameLabel.Visible=false
-                            data.distLabel.Visible=false; data.hpBarBg.Visible=false
-                        end
-                    end
-                end
-                for model, _ in pairs(espData) do
-                    if not seen[model] then
-                        removeESPForModel(model)
-                    end
-                end
-            end
-        end
-    end
-end)
-
--- AIMBOT RENDERSTEP
-local aimWasScriptable = false
-local aimCamOffset = Vector3.zero
-
-RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value + 1, function()
-    if showFOVCircle then
-        FOVFrame.Visible = true
-        local vp = Camera.ViewportSize
-        FOVFrame.Position = UDim2.fromOffset(vp.X / 2, vp.Y / 2)
-        FOVFrame.Size = UDim2.fromOffset(aimbotFOV * 2, aimbotFOV * 2)
-    else
-        FOVFrame.Visible = false
-    end
-
-    local char, hrp, hum = safeCharacter()
-    if not hrp then
-        if aimWasScriptable then
-            aimWasScriptable = false
-            pcall(function() Camera.CameraType = Enum.CameraType.Custom end)
-            if hum then hum.AutoRotate = true end
-        end
-        return
-    end
-
-    if aimbotEnabled then
-        aimbotTarget = getAimbotTarget()
-    else
-        aimbotTarget = nil
-    end
-
-    local keyHeld = aimbotEnabled and isAimbotTriggered()
-    local hasTarget = aimbotTarget and aimbotTarget.Parent
-
-    if keyHeld and hasTarget then
-        if not aimWasScriptable then
-            aimWasScriptable = true
-            aimCamOffset = Camera.CFrame.Position - hrp.Position
-            Camera.CameraType = Enum.CameraType.Scriptable
-            if hum then hum.AutoRotate = false end
-        end
-        local alpha = 1 / math.max(aimbotSmoothness, 1)
-        local camPos = hrp.Position + aimCamOffset
-        local desiredCF = CFrame.lookAt(camPos, aimbotTarget.Position)
-        Camera.CFrame = Camera.CFrame:Lerp(desiredCF, alpha)
-        local toTarget = aimbotTarget.Position - hrp.Position
-        local flat = Vector3.new(toTarget.X, 0, toTarget.Z)
-        if flat.Magnitude > 0.05 then
-            local rotCF = CFrame.lookAt(hrp.Position, hrp.Position + flat.Unit)
-            hrp.CFrame = hrp.CFrame:Lerp(rotCF, math.min(1, alpha * 2))
-        end
-    else
-        if aimWasScriptable then
-            aimWasScriptable = false
-            pcall(function() Camera.CameraType = Enum.CameraType.Custom end)
-            if hum then hum.AutoRotate = true end
-        end
-    end
-end)
-
-captureOriginal(LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait())
-
-print("STRXcahts v32-HBOT | hitbox bot support enabled")
