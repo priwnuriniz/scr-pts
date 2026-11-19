@@ -1,4 +1,4 @@
--- STRXcahts v34-IRONMAN
+-- STRXcahts v35 FINAL | All features + Iron Man Fly + Cyberpunk Menu
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 local Players           = game:GetService("Players")
@@ -13,7 +13,7 @@ local Camera            = workspace.CurrentCamera
 local connections = {}
 local function track(c) table.insert(connections, c); return c end
 
--- ============ GUI PARENT (FIX) ============
+-- ============ GUI PARENT ============
 local function getGuiParent()
     local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if pg then return pg end
@@ -22,7 +22,6 @@ local function getGuiParent()
     return game:GetService("CoreGui")
 end
 local guiParent = getGuiParent()
-print("[STRX] GUI parent:", guiParent)
 
 local function newScreenGui(name, order)
     local g = Instance.new("ScreenGui")
@@ -31,13 +30,26 @@ local function newScreenGui(name, order)
     g.IgnoreGuiInset = false
     g.DisplayOrder = order
     g.Enabled = true
-    local ok = pcall(function() g.Parent = guiParent end)
-    if not ok or not g.Parent then
+    pcall(function() g.Parent = guiParent end)
+    if not g.Parent then
         local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
         if pg then pcall(function() g.Parent = pg end) end
     end
     return g
 end
+
+-- ============ THEME ============
+local THEME = {
+    bg = Color3.fromRGB(10, 14, 26),
+    surface = Color3.fromRGB(18, 25, 42),
+    surfaceAlt = Color3.fromRGB(24, 32, 52),
+    primary = Color3.fromRGB(0, 212, 255),
+    secondary = Color3.fromRGB(255, 215, 0),
+    text = Color3.fromRGB(255, 255, 255),
+    textDim = Color3.fromRGB(138, 155, 168),
+    danger = Color3.fromRGB(255, 60, 90),
+    success = Color3.fromRGB(0, 220, 130),
+}
 
 -- ============ STATE ============
 local flyEnabled, flySpeed = false, 60
@@ -97,19 +109,6 @@ local listeningForLookTpKey = false
 local tpAuraBotDetect = false
 local tpAuraIgnoreTeammates = true
 
--- ============ THEME ============
-local THEME = {
-    bg = Color3.fromRGB(10, 14, 26),
-    surface = Color3.fromRGB(18, 25, 42),
-    surfaceAlt = Color3.fromRGB(24, 32, 52),
-    primary = Color3.fromRGB(0, 212, 255),
-    secondary = Color3.fromRGB(255, 215, 0),
-    text = Color3.fromRGB(255, 255, 255),
-    textDim = Color3.fromRGB(138, 155, 168),
-    danger = Color3.fromRGB(255, 60, 90),
-    success = Color3.fromRGB(0, 220, 130),
-}
-
 -- ============ BOT CACHE ============
 local botCache = {}
 local botCacheTime = 0
@@ -154,7 +153,7 @@ local function getDisplayName(char)
     return char.Name
 end
 
--- ============ TEAM (FIX: simple + safe) ============
+-- ============ TEAM ============
 local function isTeammate(player)
     if not player or player == LocalPlayer then return true end
     if LocalPlayer.Team and player.Team then
@@ -238,13 +237,12 @@ local function isPlayerVisible(targetChar)
     return r == nil
 end
 
--- ============ IRON MAN THRUSTERS (YENİ) ============
+-- ============ IRON MAN THRUSTERS ============
 local function createThruster(hrp)
     local att = Instance.new("Attachment")
     att.Name = "STRX_ThrusterAtt"
     att.Position = Vector3.new(0, -2.8, 0)
     att.Parent = hrp
-    
     local fire = Instance.new("ParticleEmitter")
     fire.Name = "STRX_ThrusterFire"
     fire.Texture = "rbxasset://textures/particles/fire_main.dds"
@@ -272,7 +270,6 @@ local function createThruster(hrp)
     fire.LightInfluence = 0
     fire.ZOffset = -2
     fire.Parent = att
-    
     local spark = Instance.new("ParticleEmitter")
     spark.Name = "STRX_ThrusterSpark"
     spark.Texture = "rbxasset://textures/particles/sparkles_main.dds"
@@ -286,7 +283,6 @@ local function createThruster(hrp)
     spark.LightEmission = 1
     spark.LightInfluence = 0
     spark.Parent = att
-    
     return att
 end
 
@@ -297,7 +293,7 @@ local function destroyThruster()
     end
 end
 
--- ============ FLY (IRON MAN) ============
+-- ============ FLY (IRON MAN) — destroyThruster önce tanımlandı ============
 local function destroyFlyPhysics()
     if flyConn then flyConn:Disconnect() flyConn = nil end
     if flyBV then flyBV:Destroy() flyBV = nil end
@@ -323,7 +319,7 @@ local function startFly()
     flyBG.D = 100
     flyBG.Parent = hrp
     thrusterAtt = createThruster(hrp)
-    
+
     flyConn = RunService.RenderStepped:Connect(function(dt)
         if not flyEnabled then return end
         local _, r = safeCharacter()
@@ -336,16 +332,13 @@ local function startFly()
         if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += camCF.RightVector end
         if UserInputService:IsKeyDown(Enum.KeyCode.E) then dir += Vector3.yAxis end
         if UserInputService:IsKeyDown(Enum.KeyCode.Q) then dir -= Vector3.yAxis end
-        
         local target = dir.Magnitude > 0 and (dir.Unit * flySpeed) or Vector3.zero
         flyBV.Velocity = flyBV.Velocity:Lerp(target, math.min(1, dt * 10))
-        
         if flyBG then
             local camLook = camCF.LookVector
             local flatLook = Vector3.new(camLook.X, 0, camLook.Z)
             if flatLook.Magnitude > 0.01 then
                 local cf = CFrame.lookAt(r.Position, r.Position + flatLook.Unit)
-                -- Iron Man forward lean when moving forward
                 local horizDir = Vector3.new(dir.X, 0, dir.Z)
                 if horizDir.Magnitude > 0.1 then
                     local dot = horizDir.Unit:Dot(flatLook.Unit)
@@ -473,4 +466,264 @@ local function lookTp()
     local p = RaycastParams.new()
     p.FilterDescendantsInstances = {LocalPlayer.Character}
     p.FilterType = Enum.RaycastFilterType.Exclude
-    local hit = workspace:Raycast(ray.Origin, ray
+    local hit = workspace:Raycast(ray.Origin, ray.Direction * 5000, p)
+    if hit then
+        savedPosition = hrp.CFrame
+        teleportCharacterTo(CFrame.new(hit.Position + Vector3.new(0, 3, 0)))
+    end
+end
+
+-- ============ HITBOX ============
+local function hitboxLoop()
+    if hitboxLoopActive then return end
+    hitboxLoopActive = true
+    while hitboxEnabled do
+        local targets = {}
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character then
+                table.insert(targets, p.Character)
+            end
+        end
+        if hitboxBotDetect then
+            refreshBotCache()
+            for _, model in ipairs(botCache) do
+                table.insert(targets, model)
+            end
+        end
+        for _, char in ipairs(targets) do
+            for _, name in ipairs({"Head","HumanoidRootPart","UpperTorso","Torso","LowerTorso"}) do
+                local part = char:FindFirstChild(name)
+                if part then
+                    if not originalSizes[part] then originalSizes[part] = part.Size end
+                    local s = originalSizes[part]
+                    pcall(function()
+                        part.Size = Vector3.new(math.max(s.X, hitboxSize),
+                                               math.max(s.Y, hitboxSize),
+                                               math.max(s.Z, hitboxSize))
+                    end)
+                end
+            end
+        end
+        task.wait(0.1)
+    end
+    for part, size in pairs(originalSizes) do
+        if part and part.Parent then pcall(function() part.Size = size end) end
+    end
+    hitboxLoopActive = false
+end
+
+-- ============ CLEANUP ============
+local function cleanup()
+    for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
+    connections = {}
+    pcall(destroyFlyPhysics)
+    if noclipConn then pcall(function() noclipConn:Disconnect() end) noclipConn = nil end
+    if spinAV then pcall(function() spinAV:Destroy() end) spinAV = nil end
+    pcall(function() RunService:UnbindFromRenderStep("STRX_Aimbot_Move") end)
+    for _, name in ipairs({"STRXcahtsMenu","STRX_ESPGui","STRX_FOVGui","STRX_Watermark"}) do
+        local g = guiParent:FindFirstChild(name)
+        if g then pcall(function() g:Destroy() end) end
+    end
+    _G.STRXcahts = nil
+end
+_G.STRXcahts = {Cleanup = cleanup}
+
+-- ============ GUIs ============
+local ScreenGui   = newScreenGui("STRXcahtsMenu", 50)
+local ESPGui      = newScreenGui("STRX_ESPGui", 6)
+ESPGui.IgnoreGuiInset = true
+local FOVGui      = newScreenGui("STRX_FOVGui", 5)
+FOVGui.IgnoreGuiInset = true
+local WatermarkGui= newScreenGui("STRX_Watermark", 100)
+
+local FOVFrame = Instance.new("Frame", FOVGui)
+FOVFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+FOVFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+FOVFrame.BackgroundTransparency = 1
+FOVFrame.Visible = false
+Instance.new("UICorner", FOVFrame).CornerRadius = UDim.new(1, 0)
+local FOVStroke = Instance.new("UIStroke", FOVFrame)
+FOVStroke.Color = THEME.primary
+FOVStroke.Thickness = 2
+local FOVGradient = Instance.new("UIGradient", FOVStroke)
+FOVGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, THEME.primary),
+    ColorSequenceKeypoint.new(1, THEME.secondary)
+}
+FOVGradient.Rotation = 45
+
+-- Watermark
+local wmFrame = Instance.new("Frame", WatermarkGui)
+wmFrame.Size = UDim2.new(0, 210, 0, 28)
+wmFrame.Position = UDim2.new(1, -220, 0, 10)
+wmFrame.BackgroundColor3 = THEME.bg
+wmFrame.BackgroundTransparency = 0.2
+Instance.new("UICorner", wmFrame).CornerRadius = UDim.new(0, 6)
+local wmStroke = Instance.new("UIStroke", wmFrame)
+wmStroke.Color = THEME.primary
+wmStroke.Thickness = 1.2
+local wmGradient = Instance.new("UIGradient", wmStroke)
+wmGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, THEME.primary),
+    ColorSequenceKeypoint.new(1, THEME.secondary)
+}
+local wmText = Instance.new("TextLabel", wmFrame)
+wmText.Size = UDim2.new(1, 0, 1, 0)
+wmText.BackgroundTransparency = 1
+wmText.Text = "◆ STRXCHATS | 60 FPS"
+wmText.TextColor3 = THEME.primary
+wmText.Font = Enum.Font.GothamBold
+wmText.TextSize = 12
+
+-- ============ ESP ============
+local function createESPForModel(char)
+    if espData[char] then
+        for _, k in ipairs({"box","nameLabel","distLabel","hpBarBg"}) do
+            if espData[char][k] then espData[char][k]:Destroy() end
+        end
+    end
+    local box = Instance.new("Frame", ESPGui)
+    box.BackgroundTransparency = 1
+    box.Visible = false
+    local boxStroke = Instance.new("UIStroke", box)
+    boxStroke.Thickness = 1.6
+    local hpBarBg = Instance.new("Frame", box)
+    hpBarBg.Size = UDim2.new(0, 3, 1, 0)
+    hpBarBg.Position = UDim2.new(0, -6, 0, 0)
+    hpBarBg.BackgroundColor3 = Color3.fromRGB(20,20,20)
+    hpBarBg.Visible = false
+    local hpFill = Instance.new("Frame", hpBarBg)
+    hpFill.Size = UDim2.new(1,0,1,0)
+    hpFill.AnchorPoint = Vector2.new(0,1)
+    hpFill.Position = UDim2.new(0,0,1,0)
+    local nameLbl = Instance.new("TextLabel", ESPGui)
+    nameLbl.BackgroundTransparency = 1
+    nameLbl.Text = getDisplayName(char)
+    nameLbl.TextColor3 = THEME.text
+    nameLbl.Font = Enum.Font.GothamBold
+    nameLbl.TextSize = 14
+    nameLbl.TextStrokeTransparency = 0.4
+    nameLbl.Visible = false
+    local distLbl = Instance.new("TextLabel", ESPGui)
+    distLbl.BackgroundTransparency = 1
+    distLbl.Font = Enum.Font.Gotham
+    distLbl.TextSize = 12
+    distLbl.TextStrokeTransparency = 0.4
+    distLbl.Visible = false
+    espData[char] = {box=box, stroke=boxStroke, nameLabel=nameLbl, distLabel=distLbl, hpBarBg=hpBarBg, hpFill=hpFill}
+end
+
+local function removeESPForModel(char)
+    if espData[char] then
+        for _, k in ipairs({"box","nameLabel","distLabel","hpBarBg"}) do
+            if espData[char][k] then espData[char][k]:Destroy() end
+        end
+        espData[char] = nil
+    end
+end
+
+-- ============ AIMBOT TARGET ============
+local aimRayParams = RaycastParams.new()
+aimRayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+local function getAimbotTarget()
+    local closest, shortest = nil, math.huge
+    local center = Camera.ViewportSize / 2
+    local myChar = LocalPlayer.Character
+    if not myChar then return nil end
+    local allChars = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            if not (aimbotIgnoreTeammates and isTeammate(p)) then
+                table.insert(allChars, p.Character)
+            end
+        end
+    end
+    if aimbotBotDetect then
+        refreshBotCache()
+        for _, model in ipairs(botCache) do
+            table.insert(allChars, model)
+        end
+    end
+    for _, char in ipairs(allChars) do
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local alive = (hum == nil) or (hum.Health > 0)
+        if alive then
+            local targetPart = char:FindFirstChild(aimbotAimPart) or char:FindFirstChild("HumanoidRootPart")
+            if targetPart then
+                local sp, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                if onScreen then
+                    local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+                    if d <= aimbotFOV then
+                        local ok = true
+                        if aimbotWallCheck then
+                            aimRayParams.FilterDescendantsInstances = {char, myChar}
+                            local r = workspace:Raycast(Camera.CFrame.Position, targetPart.Position - Camera.CFrame.Position, aimRayParams)
+                            if r then ok = false end
+                        end
+                        if ok and d < shortest then shortest, closest = d, targetPart end
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+-- ============ UI BUILDERS (CYBERPUNK) ============
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 700, 0, 560)
+MainFrame.Position = UDim2.new(0.5, -350, 0.5, -280)
+MainFrame.BackgroundColor3 = THEME.bg
+MainFrame.BackgroundTransparency = 0.05
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.ClipsDescendants = true
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 16)
+local mainStroke = Instance.new("UIStroke", MainFrame)
+mainStroke.Color = THEME.primary
+mainStroke.Thickness = 1.5
+mainStroke.Transparency = 0.2
+local mainGrad = Instance.new("UIGradient", mainStroke)
+mainGrad.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, THEME.primary),
+    ColorSequenceKeypoint.new(0.5, THEME.secondary),
+    ColorSequenceKeypoint.new(1, THEME.primary)
+}
+mainGrad.Rotation = 45
+
+-- bg grid pattern
+local bgLogo = Instance.new("TextLabel", MainFrame)
+bgLogo.Size = UDim2.new(1,0,1,0)
+bgLogo.BackgroundTransparency = 1
+bgLogo.Text = "STRX"
+bgLogo.TextColor3 = THEME.primary
+bgLogo.TextTransparency = 0.92
+bgLogo.Font = Enum.Font.GothamBlack
+bgLogo.TextSize = 200
+bgLogo.ZIndex = 0
+
+-- Title bar
+local Title = Instance.new("Frame", MainFrame)
+Title.Size = UDim2.new(1,0,0,54)
+Title.BackgroundColor3 = THEME.surface
+Title.BackgroundTransparency = 0
+Title.ZIndex = 2
+Instance.new("UICorner", Title).CornerRadius = UDim.new(0, 16)
+local titleBottom = Instance.new("Frame", Title)
+titleBottom.Size = UDim2.new(1,0,0,2)
+titleBottom.Position = UDim2.new(0,0,1,-1)
+titleBottom.BackgroundColor3 = THEME.primary
+titleBottom.BorderSizePixel = 0
+titleBottom.ZIndex = 3
+local titleGrad = Instance.new("UIGradient", titleBottom)
+titleGrad.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, THEME.primary),
+    ColorSequenceKeypoint.new(0.5, THEME.secondary),
+    ColorSequenceKeypoint.new(1, THEME.primary)
+}
+local titleLbl = Instance.new("TextLabel", Title)
+titleLbl.Size = UDim2.new(1,-120,1,0)
+titleLbl.Position = UDim2.new(0,20,0,0)
+titleLbl.BackgroundTransparency = 1
+titleLbl.Text = "◆ STRXCHATS
