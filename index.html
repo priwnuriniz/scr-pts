@@ -1,5 +1,4 @@
--- STRXcahts v16 | Anti-Kick Fix & Safe Execution
--- Silent Aim Rate-Limited | Stable Aimbot | Full Features
+-- STRXcahts v17 | Aimbot & ESP Fixed | Silent Aim Removed | Aimbot Keybind Added
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -40,22 +39,13 @@ local espData = {}
 
 -- Aimbot
 local aimbotEnabled = false
+local aimbotKey = Enum.UserInputType.MouseButton2 -- Varsayılan Sağ Tık
 local aimbotFOV = 150
 local aimbotSmoothness = 3
 local aimbotTeamCheck, aimbotWallCheck = false, true
 local aimbotAimPart = "Head"
 local aimbotTarget = nil
 local lastAimScan = 0
-
--- Silent Aim (Safe Mode)
-local silentAimEnabled = false
-local silentAimFOV = 150
-local silentAimTeamCheck = false
-local silentAimWallCheck = false
-local silentAimTargetPart = "Head"
-local silentAimHitChance = 100
-local silentAimCooldown = 0
-local oldIndex = nil
 
 -- Troll
 local frozenEnabled, ragdollEnabled = false, false
@@ -72,7 +62,6 @@ local spinAV
 local keybinds = {
     fly = {key = Enum.KeyCode.F, callback = nil},
     aimbot = {key = Enum.KeyCode.F2, callback = nil},
-    silent = {key = Enum.KeyCode.F3, callback = nil},
     esp = {key = Enum.KeyCode.X, callback = nil},
     noclip = {key = Enum.KeyCode.N, callback = nil},
     infJump = {key = Enum.KeyCode.J, callback = nil},
@@ -81,6 +70,7 @@ local keybinds = {
     menu = {key = Enum.KeyCode.Insert, callback = nil},
 }
 local listeningForBind = nil
+local listeningForAimTrigger = false
 local keybindButtons = {}
 
 -- ==== HELPERS ====
@@ -96,6 +86,17 @@ local function safeCharacter()
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hrp or not hum then return nil end
     return char, hrp, hum
+end
+
+local function isAimbotTriggered()
+    if typeof(aimbotKey) == "EnumItem" then
+        if aimbotKey.EnumType == Enum.KeyCode then
+            return UserInputService:IsKeyDown(aimbotKey)
+        elseif aimbotKey.EnumType == Enum.UserInputType then
+            return UserInputService:IsMouseButtonPressed(aimbotKey)
+        end
+    end
+    return false
 end
 
 -- ==== FLY / SPEED / NOCLIP ====
@@ -225,13 +226,11 @@ local function toggleFullbright(state)
     end
 end
 
--- ==== ESP (AUTO-FIX) ====
+-- ==== ESP (Kusursuz Onarım) ====
 local function createESPFor(player)
     if player == LocalPlayer then return end
     local char = player.Character
     if not char then return end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
 
     if espData[player] then
         if espData[player].highlight then espData[player].highlight:Destroy() end
@@ -301,28 +300,16 @@ local function removeESPFor(player)
     end
 end
 
-local function onCharacterAdded(player, char)
-    if player == LocalPlayer then return end
-    removeESPFor(player)
-    if espEnabled then
-        task.wait(0.5)
-        createESPFor(player)
+local function refreshESP()
+    if not espEnabled then return end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and not espData[p] then
+            createESPFor(p)
+        end
     end
 end
 
-Players.PlayerAdded:Connect(function(p)
-    if espEnabled then createESPFor(p) end
-    p.CharacterAdded:Connect(function(char) onCharacterAdded(p, char) end)
-end)
-Players.PlayerRemoving:Connect(function(p) removeESPFor(p) end)
-for _, p in ipairs(Players:GetPlayers()) do
-    if p ~= LocalPlayer then
-        p.CharacterAdded:Connect(function(char) onCharacterAdded(p, char) end)
-        if espEnabled then createESPFor(p) end
-    end
-end
-
--- ==== AIMBOT ====
+-- ==== AIMBOT (Keskin ve Çalışan Sürüm) ====
 local aimRayParams = RaycastParams.new()
 aimRayParams.FilterType = Enum.RaycastFilterType.Exclude
 
@@ -362,146 +349,28 @@ local function getAimbotTarget()
     return closest
 end
 
--- Aimbot Kilitlenme (RenderStep)
+-- Kamera Hareketi (RenderStep)
 RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value + 1, function()
-    if aimbotEnabled and aimbotTarget and aimbotTarget.Parent then
+    if not aimbotEnabled then return end
+    
+    -- Ateşleme tuşuna basılı mı?
+    if not isAimbotTriggered() then
+        aimbotTarget = nil
+        return
+    end
+
+    if aimbotTarget and aimbotTarget.Parent then
         local hum = aimbotTarget.Parent:FindFirstChildOfClass("Humanoid")
-        if not hum or hum.Health <= 0 then aimbotTarget = nil return end
+        if not hum or hum.Health <= 0 then 
+            aimbotTarget = nil 
+            return 
+        end
         
         local targetPos = aimbotTarget.Position
-        local vel = aimbotTarget.AssemblyLinearVelocity
-        local dist = (targetPos - Camera.CFrame.Position).Magnitude
-        local predPos = targetPos + (vel * (dist / 2000) * 0.5) 
-        
-        local cf = CFrame.new(Camera.CFrame.Position, predPos)
+        local cf = CFrame.new(Camera.CFrame.Position, targetPos)
         Camera.CFrame = Camera.CFrame:Lerp(cf, 1 / math.max(aimbotSmoothness, 1))
     end
 end)
-
--- ==== SILENT AIM (SAFE HOOK) ====
-local function getSilentAimTarget()
-    local closest, shortest = nil, math.huge
-    local myChar = LocalPlayer.Character
-    if not myChar then return nil end
-    local center = Camera.ViewportSize / 2
-    
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p == LocalPlayer then continue end
-        if silentAimTeamCheck and p.Team and LocalPlayer.Team and p.Team == LocalPlayer.Team then continue end
-        local char = p.Character
-        if not char then continue end
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not hum or hum.Health <= 0 then continue end
-        
-        local targetPart = char:FindFirstChild(silentAimTargetPart) 
-            or char:FindFirstChild("UpperTorso") 
-            or char:FindFirstChild("Torso") 
-            or char:FindFirstChild("HumanoidRootPart")
-            
-        if not targetPart then continue end
-        
-        local sp, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-        if not onScreen then continue end
-        local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-        if d > silentAimFOV then continue end
-        
-        if silentAimWallCheck then
-            aimRayParams.FilterDescendantsInstances = {char, myChar}
-            local r = workspace:Raycast(Camera.CFrame.Position, targetPart.Position - Camera.CFrame.Position, aimRayParams)
-            if r then continue end
-        end
-        if d < shortest then shortest, closest = d, targetPart end
-    end
-    return closest
-end
-
-local function startSilentAim()
-    if silentAimEnabled then return end
-    silentAimEnabled = true
-    pcall(function()
-        oldIndex = hookmetamethod(game, "__index", function(self, key)
-            if not silentAimEnabled then return oldIndex(self, key) end
-            
-            -- Rate Limit: Saniyede en fazla 15 kez hedef hesaplaması yap (Tespiti azaltır)
-            if tick() - silentAimCooldown < 0.06 then
-                return oldIndex(self, key)
-            end
-
-            if type(key) == "string" and (key == "Hit" or key == "Target") then
-                local isMouse = pcall(function() return self:IsA("Mouse") end)
-                if isMouse and self:IsA("Mouse") then
-                    if math.random(1, 100) <= silentAimHitChance then
-                        local target = getSilentAimTarget()
-                        if target then
-                            silentAimCooldown = tick()
-                            if key == "Hit" then return CFrame.new(target.Position) end
-                            if key == "Target" then return target end
-                        end
-                    end
-                end
-            end
-            return oldIndex(self, key)
-        end)
-    end)
-end
-
-local function stopSilentAim()
-    silentAimEnabled = false
-end
-
--- ==== EMOTE / TROLL ====
-local emoteList = {
-    {name = "El Salla", emote = "wave", animId = "rbxassetid://507770239"},
-    {name = "Dans 1", emote = "dance", animId = "rbxassetid://507771019"},
-    {name = "Dans 2", emote = "dance2", animId = "rbxassetid://507777268"},
-    {name = "Gul", emote = "laugh", animId = "rbxassetid://507770818"},
-    {name = "Alkis", emote = "cheer", animId = "rbxassetid://507770677"},
-    {name = "Otur", emote = "sit", animId = nil},
-}
-local activeEmoteTrack = nil
-
-local function playCharacterEmote(e)
-    local _, _, hum = safeCharacter()
-    if not hum then return end
-    if activeEmoteTrack then pcall(function() activeEmoteTrack:Stop() end) activeEmoteTrack = nil end
-    if e.emote == "sit" then hum.Sit = not hum.Sit return end
-    local ok = pcall(function() if hum.PlayEmote then hum:PlayEmote(e.emote) else error("no") end end)
-    if not ok and e.animId then
-        local animator = hum:FindFirstChildOfClass("Animator")
-        if animator then
-            pcall(function()
-                local anim = Instance.new("Animation")
-                anim.AnimationId = e.animId
-                activeEmoteTrack = animator:LoadAnimation(anim)
-                activeEmoteTrack:Play()
-                task.delay(3, function() if activeEmoteTrack then pcall(function() activeEmoteTrack:Stop() end) activeEmoteTrack = nil end end)
-            end)
-        end
-    end
-end
-
-local function toggleFreeze(state)
-    frozenEnabled = state
-    local char = LocalPlayer.Character
-    if not char then return end
-    if state then
-        frozenAnchors = {}
-        for _, v in ipairs(char:GetDescendants()) do
-            if v:IsA("BasePart") and not v.Anchored then v.Anchored = true; table.insert(frozenAnchors, v) end
-        end
-    else
-        for _, v in ipairs(frozenAnchors) do if v.Parent then v.Anchored = false end end
-        frozenAnchors = {}
-    end
-end
-
-local function toggleRagdoll(state)
-    ragdollEnabled = state
-    local _, _, hum = safeCharacter()
-    if not hum then return end
-    if state then hum.PlatformStand = true; hum:ChangeState(Enum.HumanoidStateType.Physics)
-    else hum.PlatformStand = false; hum:ChangeState(Enum.HumanoidStateType.GettingUp) end
-end
 
 -- =============================================
 -- ==== UI BAŞLANGIÇ ====
@@ -538,7 +407,7 @@ Instance.new("UICorner", bgImage).CornerRadius = UDim.new(0, 14)
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1, 0, 0, 50)
 Title.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
-Title.Text = "  STRXcahts v16  |  Insert = Ac/Kapat"
+Title.Text = "  STRXcahts v17  |  Insert = Ac/Kapat"
 Title.TextColor3 = Color3.new(1,1,1)
 Title.Font = Enum.Font.GothamBlack
 Title.TextSize = 15
@@ -562,7 +431,7 @@ fpsLbl.TextSize = 12
 fpsLbl.TextXAlignment = Enum.TextXAlignment.Right
 fpsLbl.ZIndex = 3
 
-local tabNames = {"Player", "ESP", "Aimbot", "Silent", "Emote", "Troll", "Ayarlar"}
+local tabNames = {"Player", "ESP", "Aimbot", "Emote", "Troll", "Ayarlar"}
 local tabs = {}
 local tabHolder = Instance.new("Frame", MainFrame)
 tabHolder.Size = UDim2.new(1, -30, 0, 34)
@@ -575,7 +444,7 @@ tabLay.Padding = UDim.new(0, 5)
 
 for i, name in ipairs(tabNames) do
     local btn = Instance.new("TextButton", tabHolder)
-    btn.Size = UDim2.new(0, 88, 1, 0)
+    btn.Size = UDim2.new(0, 100, 1, 0)
     btn.BackgroundColor3 = i == 1 and Color3.fromRGB(255, 140, 0) or Color3.fromRGB(38, 38, 45)
     btn.Text = name
     btn.TextColor3 = Color3.new(1,1,1)
@@ -738,7 +607,6 @@ end
 local playerPage = makePage()
 local espPage = makePage()
 local aimbotPage = makePage()
-local silentPage = makePage()
 local emotePage = makePage()
 local trollPage = makePage()
 local settingsPage = makePage()
@@ -772,17 +640,56 @@ makeToggle(espPage, "Mesafe Goster", 130, function(s) espShowDistance = s end)
 makeSlider(espPage, "Max Mesafe", 50, 3000, espMaxDistance, 170, function(v) espMaxDistance = v end)
 
 -- AIMBOT
-makeToggle(aimbotPage, "Aimbot (Sag Tik)", 10, function(s) aimbotEnabled = s; if not s then aimbotTarget = nil end end, "aimbot")
-makeSlider(aimbotPage, "FOV", 20, 400, aimbotFOV, 50, function(v) aimbotFOV = v end)
-makeSlider(aimbotPage, "Yumusaklik (1=Hizli)", 1, 20, aimbotSmoothness, 100, function(v) aimbotSmoothness = v end)
-makeToggle(aimbotPage, "Duvar Kontrolu", 150, function(s) aimbotWallCheck = s end)
+makeToggle(aimbotPage, "Aimbot Ac/Kapat", 10, function(s) aimbotEnabled = s; if not s then aimbotTarget = nil end end, "aimbot")
 
--- SILENT
-makeToggle(silentPage, "Silent Aim", 10, function(s) if s then startSilentAim() else stopSilentAim() end end, "silent")
-makeSlider(silentPage, "FOV", 20, 400, silentAimFOV, 50, function(v) silentAimFOV = v end)
-makeSlider(silentPage, "Isabet Sansi (%)", 10, 100, silentAimHitChance, 100, function(v) silentAimHitChance = v end)
+-- AIMBOT TETİKLEYİCİ TUŞ AYARI
+local aimKeyRow = Instance.new("Frame", aimbotPage)
+aimKeyRow.Size = UDim2.new(0, 320, 0, 34)
+aimKeyRow.Position = UDim2.new(0, 8, 0, 50)
+aimKeyRow.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+aimKeyRow.ZIndex = 2
+Instance.new("UICorner", aimKeyRow).CornerRadius = UDim.new(0, 7)
+local aimKeyLbl = Instance.new("TextLabel", aimKeyRow)
+aimKeyLbl.Size = UDim2.new(1, -130, 1, 0)
+aimKeyLbl.Position = UDim2.new(0, 12, 0, 0)
+aimKeyLbl.BackgroundTransparency = 1
+aimKeyLbl.Text = "Aimbot Kilitlenme Tusu"
+aimKeyLbl.TextColor3 = Color3.new(1,1,1)
+aimKeyLbl.Font = Enum.Font.Gotham
+aimKeyLbl.TextSize = 13
+aimKeyLbl.TextXAlignment = Enum.TextXAlignment.Left
+aimKeyLbl.ZIndex = 2
+
+local aimKeyBtn = Instance.new("TextButton", aimKeyRow)
+aimKeyBtn.Size = UDim2.new(0, 100, 0, 22)
+aimKeyBtn.Position = UDim2.new(1, -112, 0.5, -11)
+aimKeyBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+aimKeyBtn.Text = "Sag Tik"
+aimKeyBtn.TextColor3 = Color3.new(1,1,1)
+aimKeyBtn.Font = Enum.Font.GothamBold
+aimKeyBtn.TextSize = 10
+aimKeyBtn.ZIndex = 2
+Instance.new("UICorner", aimKeyBtn).CornerRadius = UDim.new(0, 5)
+
+aimKeyBtn.MouseButton1Click:Connect(function()
+    listeningForAimTrigger = true
+    aimKeyBtn.Text = "Bekleniyor..."
+    aimKeyBtn.BackgroundColor3 = Color3.fromRGB(180, 120, 0)
+end)
+
+makeSlider(aimbotPage, "FOV", 20, 400, aimbotFOV, 90, function(v) aimbotFOV = v end)
+makeSlider(aimbotPage, "Yumusaklik", 1, 20, aimbotSmoothness, 140, function(v) aimbotSmoothness = v end)
+makeToggle(aimbotPage, "Duvar Kontrolu", 190, function(s) aimbotWallCheck = s end)
 
 -- EMOTE
+local emoteList = {
+    {name = "El Salla", emote = "wave", animId = "rbxassetid://507770239"},
+    {name = "Dans 1", emote = "dance", animId = "rbxassetid://507771019"},
+    {name = "Dans 2", emote = "dance2", animId = "rbxassetid://507777268"},
+    {name = "Gul", emote = "laugh", animId = "rbxassetid://507770818"},
+    {name = "Alkis", emote = "cheer", animId = "rbxassetid://507770677"},
+    {name = "Otur", emote = "sit", animId = nil},
+}
 for i, e in ipairs(emoteList) do
     local b = Instance.new("TextButton", emotePage)
     b.Size = UDim2.new(0, 100, 0, 40)
@@ -792,18 +699,23 @@ for i, e in ipairs(emoteList) do
     b.TextColor3 = Color3.new(1,1,1)
     b.ZIndex = 3
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
-    b.MouseButton1Click:Connect(function() playCharacterEmote(e) end)
+    b.MouseButton1Click:Connect(function() 
+        local _, _, hum = safeCharacter()
+        if hum then
+            pcall(function() hum:PlayEmote(e.emote) end)
+        end
+    end)
 end
 
 -- TROLL
-makeToggle(trollPage, "Kendini Dondur", 10, function(s) toggleFreeze(s) end)
-makeToggle(trollPage, "Kendini Ragdoll Yap", 50, function(s) toggleRagdoll(s) end)
+makeToggle(trollPage, "Kendini Dondur", 10, function(s) frozenEnabled = s; if s then local char = LocalPlayer.Character if char then for _, v in ipairs(char:GetDescendants()) do if v:IsA("BasePart") then v.Anchored = true end end end else local char = LocalPlayer.Character if char then for _, v in ipairs(char:GetDescendants()) do if v:IsA("BasePart") then v.Anchored = false end end end end end)
+makeToggle(trollPage, "Kendini Ragdoll Yap", 50, function(s) local _, _, hum = safeCharacter() if hum then hum.PlatformStand = s end end)
 
 -- AYARLAR
 makeToggle(settingsPage, "RGB Renk Modu", 10, function(s) rgbEnabled = s end)
 makeToggle(settingsPage, "FPS Sayaci", 50, function(s) showFps = s; fpsLbl.Visible = s end)
 
-local pages = {Player = playerPage, ESP = espPage, Aimbot = aimbotPage, Silent = silentPage, Emote = emotePage, Troll = trollPage, Ayarlar = settingsPage}
+local pages = {Player = playerPage, ESP = espPage, Aimbot = aimbotPage, Emote = emotePage, Troll = trollPage, Ayarlar = settingsPage}
 local activeTab = "Player"
 local function showPage(name)
     activeTab = name
@@ -815,7 +727,10 @@ end
 for name, btn in pairs(tabs) do btn.MouseButton1Click:Connect(function() showPage(name) end) end
 showPage("Player")
 
--- ANA DÖNGÜ (Aimbot Taraması)
+-- =============================================
+-- ==== ANA DÖNGÜ (Aimbot Taraması & ESP) ====
+-- =============================================
+
 task.spawn(function()
     local frames = 0
     while true do
@@ -835,8 +750,14 @@ task.spawn(function()
             Title.BackgroundColor3 = col
         end
 
-        -- ESP
+        -- ESP ONARIM (Respawn olanları geri ekle)
         if espEnabled then
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and p.Character and not espData[p] then
+                    createESPFor(p)
+                end
+            end
+
             local _, myPos = safeCharacter()
             if myPos then
                 for player, data in pairs(espData) do
@@ -848,6 +769,7 @@ task.spawn(function()
                         local head = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
                         if not head then return end
                         local dist = (head.Position - myPos.Position).Magnitude
+                        
                         if dist > espMaxDistance then
                             data.highlight.Enabled = false
                             data.billboard.Enabled = false
@@ -868,17 +790,12 @@ task.spawn(function()
         end
 
         -- Aimbot Hedef Bulma
-        if aimbotEnabled then
+        if aimbotEnabled and isAimbotTriggered() then
             local now = tick()
             if now - lastAimScan >= 0.05 then
                 lastAimScan = now
-                local pressed = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
-                if not pressed then 
-                    aimbotTarget = nil 
-                else
-                    if not aimbotTarget or not aimbotTarget.Parent or not aimbotTarget.Parent:FindFirstChildOfClass("Humanoid") or aimbotTarget.Parent.Humanoid.Health <= 0 then
-                        aimbotTarget = getAimbotTarget()
-                    end
+                if not aimbotTarget or not aimbotTarget.Parent or not aimbotTarget.Parent:FindFirstChildOfClass("Humanoid") or aimbotTarget.Parent.Humanoid.Health <= 0 then
+                    aimbotTarget = getAimbotTarget()
                 end
             end
         end
@@ -896,6 +813,20 @@ UserInputService.InputBegan:Connect(function(input, gp)
         end
         return
     end
+    
+    if listeningForAimTrigger then
+        listeningForAimTrigger = false
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            aimbotKey = input.KeyCode
+            aimKeyBtn.Text = input.KeyCode.Name
+        elseif input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2 then
+            aimbotKey = input.UserInputType
+            aimKeyBtn.Text = (input.UserInputType == Enum.UserInputType.MouseButton1) and "Sol Tik" or "Sag Tik"
+        end
+        aimKeyBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+        return
+    end
+
     if gp then return end
 
     if keybinds.menu.key == input.KeyCode then
@@ -917,4 +848,4 @@ LocalPlayer.CharacterAdded:Connect(function()
     if espEnabled then task.wait(0.5); createESPFor(LocalPlayer) end
 end)
 
-print("STRXcahts v16 | Anti-Kick Optimized | Silent Aim Rate-Limited")
+print("STRXcahts v17 | Aimbot Keybind Added | Silent Aim Removed | ESP Fixed")
