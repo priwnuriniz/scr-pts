@@ -1,4 +1,4 @@
--- STRXcahts v21 | Aimbot Fixed | Emote Removed | RGB Text & Logo
+-- STRXcahts v22 | RGB Glow | Watermark | Hitbox Expander | Time Changer
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -24,10 +24,14 @@ local spinEnabled, spinSpeed = false, 20
 local noclipEnabled = false
 local infiniteJumpEnabled = false
 local antiAfkEnabled = false
-local fullbrightEnabled = false
+local clickTpEnabled = false
 local rgbEnabled = true
 local rgbHue = 0
 local showFps = true
+
+-- Yeni Özellikler
+local hitboxEnabled = false
+local hitboxSize = 5
 
 -- ESP
 local espEnabled = false
@@ -45,7 +49,6 @@ local aimbotSmoothness = 3
 local aimbotWallCheck = true
 local aimbotAimPart = "Head"
 local aimbotTarget = nil
-local lastAimScan = 0
 local showFOVCircle = true
 
 -- Teleport
@@ -215,21 +218,6 @@ LocalPlayer.Idled:Connect(function()
     end
 end)
 
-local function toggleFullbright(state)
-    fullbrightEnabled = state
-    if state then
-        Lighting.Brightness = 2
-        Lighting.Ambient = Color3.fromRGB(178, 178, 178)
-        Lighting.OutdoorAmbient = Color3.fromRGB(178, 178, 178)
-        Lighting.GlobalShadows = false
-    else
-        Lighting.Brightness = 1
-        Lighting.Ambient = Color3.fromRGB(70, 70, 70)
-        Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
-        Lighting.GlobalShadows = true
-    end
-end
-
 -- ==== TELEPORT FONKSİYONLARI ====
 local function teleportCharacterTo(cf)
     local char, hrp = safeCharacter()
@@ -289,6 +277,31 @@ Instance.new("UICorner", FOVFrame).CornerRadius = UDim.new(1, 0)
 local FOVStroke = Instance.new("UIStroke", FOVFrame)
 FOVStroke.Color = Color3.fromRGB(0, 255, 100)
 FOVStroke.Thickness = 2
+
+-- ==== WATERMARK (EKRAN LOGOSU) ====
+local WatermarkGui = Instance.new("ScreenGui")
+WatermarkGui.Name = "STRX_Watermark"
+WatermarkGui.Parent = guiParent
+WatermarkGui.ResetOnSpawn = false
+WatermarkGui.IgnoreGuiInset = true
+
+local wmFrame = Instance.new("Frame", WatermarkGui)
+wmFrame.Size = UDim2.new(0, 180, 0, 25)
+wmFrame.Position = UDim2.new(0, 10, 0, 10)
+wmFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+wmFrame.BackgroundTransparency = 0.3
+Instance.new("UICorner", wmFrame).CornerRadius = UDim.new(0, 4)
+local wmStroke = Instance.new("UIStroke", wmFrame)
+wmStroke.Color = Color3.fromRGB(255, 140, 0)
+wmStroke.Thickness = 1
+
+local wmText = Instance.new("TextLabel", wmFrame)
+wmText.Size = UDim2.new(1, 0, 1, 0)
+wmText.BackgroundTransparency = 1
+wmText.Text = "STRXCHATS | 60 FPS"
+wmText.TextColor3 = Color3.new(1,1,1)
+wmText.Font = Enum.Font.GothamBold
+wmText.TextSize = 12
 
 -- ==== YENİ NESİL ESP ====
 local function createESPFor(player)
@@ -365,7 +378,7 @@ for _, p in ipairs(Players:GetPlayers()) do
     end
 end
 
--- ==== AIMBOT (KAMERA KİLİTLEME - DÜZELTİLDİ) ====
+-- ==== AIMBOT (KAMERA KİLİTLEME) ====
 local aimRayParams = RaycastParams.new()
 aimRayParams.FilterType = Enum.RaycastFilterType.Exclude
 
@@ -400,7 +413,6 @@ local function getAimbotTarget()
     return closest
 end
 
--- Hedef Bulma Döngüsü (Saniyede 20 kez)
 task.spawn(function()
     while true do
         task.wait(0.05)
@@ -414,7 +426,6 @@ task.spawn(function()
     end
 end)
 
--- Kamera Kilitlenme (RenderStep)
 RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value + 1, function()
     if aimbotEnabled and showFOVCircle then
         FOVFrame.Visible = true
@@ -454,7 +465,7 @@ bgImage.ScaleType = Enum.ScaleType.Crop
 bgImage.ZIndex = 0
 Instance.new("UICorner", bgImage).CornerRadius = UDim.new(0, 14)
 
--- ARKA PLAN LOGOSU (STRXCHATS)
+-- ARKA PLAN LOGOSU (RGB OLACAK)
 local bgLogo = Instance.new("TextLabel", MainFrame)
 bgLogo.Size = UDim2.new(1, 0, 1, 0)
 bgLogo.BackgroundTransparency = 1
@@ -475,11 +486,12 @@ Title.TextSize = 18
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.ZIndex = 2
 Instance.new("UICorner", Title).CornerRadius = UDim.new(0, 14)
-local titleGrad = Instance.new("UIGradient", Title)
-titleGrad.Color = ColorSequence.new{
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 100, 0)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 60, 80))
-}
+
+-- BAŞLIK İÇİN PARLAK GLOW (UIStroke)
+local titleGlow = Instance.new("UIStroke", Title)
+titleGlow.Color = Color3.fromRGB(255, 255, 255)
+titleGlow.Thickness = 2
+titleGlow.Transparency = 0.2
 
 local fpsLbl = Instance.new("TextLabel", Title)
 fpsLbl.Size = UDim2.new(0, 100, 1, 0)
@@ -492,7 +504,6 @@ fpsLbl.TextSize = 12
 fpsLbl.TextXAlignment = Enum.TextXAlignment.Right
 fpsLbl.ZIndex = 3
 
--- SEKMELER (Emote ve Troll Kaldırıldı)
 local tabNames = {"Player", "ESP", "Aimbot", "Ayarlar"}
 local tabs = {}
 local tabHolder = Instance.new("Frame", MainFrame)
@@ -699,11 +710,11 @@ makeToggle(playerPage, "Sonsuz Ziplama", 320, function(s) infiniteJumpEnabled = 
 makeToggle(playerPage, "Spin", 360, function(s) toggleSpin(s) end, "spin")
 makeSlider(playerPage, "Spin Hizi", 1, 200, spinSpeed, 398, function(v) spinSpeed = v; if spinAV then spinAV.AngularVelocity = Vector3.new(0, v, 0) end end)
 
--- TELEPORT (TROLL YERİNE EKLENDİ)
+-- TELEPORT & EKSTRALAR
 makeButton(playerPage, "Mouse'a Isinlan", 8, 450, 155, 35, Color3.fromRGB(60, 140, 255), teleportToMouse)
 makeButton(playerPage, "Geri Don", 173, 450, 155, 35, Color3.fromRGB(200, 100, 60), goBack)
-makeToggle(playerPage, "Anti-AFK", 495, function(s) antiAfkEnabled = s end)
-makeToggle(playerPage, "Fullbright", 535, function(s) toggleFullbright(s) end)
+makeToggle(playerPage, "Tikla-Isinlan", 495, function(s) clickTpEnabled = s end)
+makeToggle(playerPage, "Anti-AFK", 535, function(s) antiAfkEnabled = s end)
 
 -- ESP
 makeToggle(espPage, "ESP Ac/Kapat", 10, function(s) 
@@ -760,9 +771,44 @@ makeSlider(aimbotPage, "FOV (Cember Boyutu)", 20, 400, aimbotFOV, 90, function(v
 makeSlider(aimbotPage, "Yumusaklik", 1, 20, aimbotSmoothness, 140, function(v) aimbotSmoothness = v end)
 makeToggle(aimbotPage, "Duvar Kontrolu", 190, function(s) aimbotWallCheck = s end)
 
+-- HITBOX EXPANDER
+local hitboxRow = Instance.new("Frame", aimbotPage)
+hitboxRow.Size = UDim2.new(0, 320, 0, 34)
+hitboxRow.Position = UDim2.new(0, 8, 0, 230)
+hitboxRow.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+hitboxRow.ZIndex = 2
+Instance.new("UICorner", hitboxRow).CornerRadius = UDim.new(0, 7)
+local hbLbl = Instance.new("TextLabel", hitboxRow)
+hbLbl.Size = UDim2.new(0.7, 0, 1, 0)
+hbLbl.Position = UDim2.new(0, 12, 0, 0)
+hbLbl.BackgroundTransparency = 1
+hbLbl.Text = "Hitbox Genisletici"
+hbLbl.TextColor3 = Color3.new(1,1,1)
+hbLbl.Font = Enum.Font.Gotham
+hbLbl.TextSize = 13
+hbLbl.TextXAlignment = Enum.TextXAlignment.Left
+hbLbl.ZIndex = 2
+local hbBtn = Instance.new("TextButton", hitboxRow)
+hbBtn.Size = UDim2.new(0, 44, 0, 22)
+hbBtn.Position = UDim2.new(1, -54, 0.5, -11)
+hbBtn.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
+hbBtn.Text = "OFF"
+hbBtn.TextColor3 = Color3.new(1,1,1)
+hbBtn.Font = Enum.Font.GothamBold
+hbBtn.TextSize = 11
+hbBtn.ZIndex = 2
+Instance.new("UICorner", hbBtn).CornerRadius = UDim.new(0, 5)
+hbBtn.MouseButton1Click:Connect(function()
+    hitboxEnabled = not hitboxEnabled
+    hbBtn.Text = hitboxEnabled and "ON" or "OFF"
+    TweenService:Create(hbBtn, TweenInfo.new(0.2), {BackgroundColor3 = hitboxEnabled and Color3.fromRGB(0, 180, 90) or Color3.fromRGB(255, 140, 0)}):Play()
+end)
+
+makeSlider(aimbotPage, "Hitbox Boyutu", 2, 15, hitboxSize, 270, function(v) hitboxSize = v end)
+
 local showFovToggle = Instance.new("Frame", aimbotPage)
 showFovToggle.Size = UDim2.new(0, 320, 0, 34)
-showFovToggle.Position = UDim2.new(0, 8, 0, 230)
+showFovToggle.Position = UDim2.new(0, 8, 0, 320)
 showFovToggle.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
 showFovToggle.ZIndex = 2
 Instance.new("UICorner", showFovToggle).CornerRadius = UDim.new(0, 7)
@@ -795,6 +841,7 @@ end)
 -- AYARLAR
 makeToggle(settingsPage, "RGB Renk Modu", 10, function(s) rgbEnabled = s end)
 makeToggle(settingsPage, "FPS Sayaci", 50, function(s) showFps = s; fpsLbl.Visible = s end)
+makeSlider(settingsPage, "Gunun Saati", 0, 24, 12, 100, function(v) Lighting.ClockTime = v end)
 
 local pages = {Player = playerPage, ESP = espPage, Aimbot = aimbotPage, Ayarlar = settingsPage}
 local activeTab = "Player"
@@ -809,7 +856,7 @@ for name, btn in pairs(tabs) do btn.MouseButton1Click:Connect(function() showPag
 showPage("Player")
 
 -- =============================================
--- ==== ANA DÖNGÜ (ESP GÜNCELLEME) ====
+-- ==== ANA DÖNGÜ (ESP, RGB, HITBOX) ====
 -- =============================================
 
 task.spawn(function()
@@ -820,23 +867,57 @@ task.spawn(function()
         
         if showFps and frames >= 33 then
             fpsLbl.Text = tostring(math.floor(frames / 0.03)) .. " FPS"
+            wmText.Text = "STRXCHATS | " .. math.floor(frames / 0.03) .. " FPS"
             frames = 0
         end
         
-        -- RGB YAZI VE TAB RENGİ
+        -- RGB RENK DÖNGÜSÜ
         if rgbEnabled then
             local col = getRGBColor()
+            -- Sekmeler
             for n, t in pairs(tabs) do 
                 if n == activeTab then 
                     t.TextColor3 = col 
+                    t.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
                 else
                     t.TextColor3 = Color3.new(1,1,1)
+                    t.BackgroundColor3 = Color3.fromRGB(38, 38, 45)
                 end 
             end
+            -- Başlık ve Logolar
             Title.TextColor3 = col
+            bgLogo.TextColor3 = col
+            bgLogo.TextTransparency = 0.75
+            wmText.TextColor3 = col
+            wmStroke.Color = col
+        end
+
+        -- HITBOX EXPANDER
+        if hitboxEnabled then
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and p.Character then
+                    local head = p.Character:FindFirstChild("Head")
+                    local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                    if head and hrp then
+                        head.Size = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
+                        head.Transparency = 0.5
+                        hrp.Size = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
+                    end
+                end
+            end
         else
-            Title.TextColor3 = Color3.new(1,1,1)
-            for n, t in pairs(tabs) do t.TextColor3 = Color3.new(1,1,1) end
+            -- Hitbox kapatılınca eski haline getir
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and p.Character then
+                    local head = p.Character:FindFirstChild("Head")
+                    local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                    if head and hrp then
+                        if head.Size.X > 2 then head.Size = Vector3.new(2, 1, 1) end
+                        head.Transparency = 0
+                        if hrp.Size.X > 2 then hrp.Size = Vector3.new(2, 2, 1) end
+                    end
+                end
+            end
         end
 
         -- 2D ESP GÜNCELLEME
@@ -948,6 +1029,11 @@ UserInputService.InputBegan:Connect(function(input, gp)
 
     if gp then return end
 
+    -- TIKLA IŞINLANMA
+    if clickTpEnabled and input.UserInputType == Enum.UserInputType.MouseButton1 and not ScreenGui.Enabled then
+        teleportToMouse()
+    end
+
     if keybinds.menu.key == input.KeyCode then
         ScreenGui.Enabled = not ScreenGui.Enabled
         return
@@ -969,4 +1055,4 @@ LocalPlayer.CharacterAdded:Connect(function()
     if spinEnabled then toggleSpin(true) end
 end)
 
-print("STRXcahts v21 | Aimbot Fixed | Emote Removed | RGB Text & Logo")
+print("STRXcahts v22 | Efsane Sürüm | Watermark + Hitbox + RGB Logolar")
