@@ -1,5 +1,5 @@
--- STRXcahts v15 | Aimbot Ultra-Stable | Sticky Aim & Prediction
--- No Teleport | Sliders Fixed | ESP Auto-Fix
+-- STRXcahts v16 | Anti-Kick Fix & Safe Execution
+-- Silent Aim Rate-Limited | Stable Aimbot | Full Features
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -38,7 +38,7 @@ local espShowName, espShowHealth, espShowDistance = true, true, true
 local espMaxDistance = 1000
 local espData = {}
 
--- Aimbot (Geliştirilmiş)
+-- Aimbot
 local aimbotEnabled = false
 local aimbotFOV = 150
 local aimbotSmoothness = 3
@@ -46,15 +46,15 @@ local aimbotTeamCheck, aimbotWallCheck = false, true
 local aimbotAimPart = "Head"
 local aimbotTarget = nil
 local lastAimScan = 0
-local AIMBOT_RETENTION = 0.5 -- Hedefi bırakmama süresi (Saniye)
 
--- Silent Aim
+-- Silent Aim (Safe Mode)
 local silentAimEnabled = false
 local silentAimFOV = 150
 local silentAimTeamCheck = false
 local silentAimWallCheck = false
 local silentAimTargetPart = "Head"
 local silentAimHitChance = 100
+local silentAimCooldown = 0
 local oldIndex = nil
 
 -- Troll
@@ -322,7 +322,7 @@ for _, p in ipairs(Players:GetPlayers()) do
     end
 end
 
--- ==== YENİ NESİL AIMBOT (ULTRA STABIL) ====
+-- ==== AIMBOT ====
 local aimRayParams = RaycastParams.new()
 aimRayParams.FilterType = Enum.RaycastFilterType.Exclude
 
@@ -340,7 +340,6 @@ local function getAimbotTarget()
         local hum = char:FindFirstChildOfClass("Humanoid")
         if not hum or hum.Health <= 0 then continue end
         
-        -- Kafa yoksa vücuda kilitlen (R6/R15 Uyumluluğu)
         local targetPart = char:FindFirstChild(aimbotAimPart) 
             or char:FindFirstChild("UpperTorso") 
             or char:FindFirstChild("Torso") 
@@ -363,25 +362,23 @@ local function getAimbotTarget()
     return closest
 end
 
--- Hedefe Pürüzsüz Kilitlenme (RenderStep)
+-- Aimbot Kilitlenme (RenderStep)
 RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value + 1, function()
     if aimbotEnabled and aimbotTarget and aimbotTarget.Parent then
         local hum = aimbotTarget.Parent:FindFirstChildOfClass("Humanoid")
         if not hum or hum.Health <= 0 then aimbotTarget = nil return end
         
-        -- Hız Tahmini (Prediction) - Hareket eden adama önceden nişan alır
         local targetPos = aimbotTarget.Position
         local vel = aimbotTarget.AssemblyLinearVelocity
         local dist = (targetPos - Camera.CFrame.Position).Magnitude
         local predPos = targetPos + (vel * (dist / 2000) * 0.5) 
         
         local cf = CFrame.new(Camera.CFrame.Position, predPos)
-        -- Smoothness değerine göre yumuşak geçiş (Sıfıra bölünmeyi önler)
         Camera.CFrame = Camera.CFrame:Lerp(cf, 1 / math.max(aimbotSmoothness, 1))
     end
 end)
 
--- ==== SILENT AIM ====
+-- ==== SILENT AIM (SAFE HOOK) ====
 local function getSilentAimTarget()
     local closest, shortest = nil, math.huge
     local myChar = LocalPlayer.Character
@@ -424,12 +421,19 @@ local function startSilentAim()
     pcall(function()
         oldIndex = hookmetamethod(game, "__index", function(self, key)
             if not silentAimEnabled then return oldIndex(self, key) end
+            
+            -- Rate Limit: Saniyede en fazla 15 kez hedef hesaplaması yap (Tespiti azaltır)
+            if tick() - silentAimCooldown < 0.06 then
+                return oldIndex(self, key)
+            end
+
             if type(key) == "string" and (key == "Hit" or key == "Target") then
                 local isMouse = pcall(function() return self:IsA("Mouse") end)
                 if isMouse and self:IsA("Mouse") then
                     if math.random(1, 100) <= silentAimHitChance then
                         local target = getSilentAimTarget()
                         if target then
+                            silentAimCooldown = tick()
                             if key == "Hit" then return CFrame.new(target.Position) end
                             if key == "Target" then return target end
                         end
@@ -534,7 +538,7 @@ Instance.new("UICorner", bgImage).CornerRadius = UDim.new(0, 14)
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1, 0, 0, 50)
 Title.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
-Title.Text = "  STRXcahts v15  |  Insert = Ac/Kapat"
+Title.Text = "  STRXcahts v16  |  Insert = Ac/Kapat"
 Title.TextColor3 = Color3.new(1,1,1)
 Title.Font = Enum.Font.GothamBlack
 Title.TextSize = 15
@@ -913,4 +917,4 @@ LocalPlayer.CharacterAdded:Connect(function()
     if espEnabled then task.wait(0.5); createESPFor(LocalPlayer) end
 end)
 
-print("STRXcahts v15 | Aimbot Ultra-Stable (Sticky Aim + Prediction) | No Teleport")
+print("STRXcahts v16 | Anti-Kick Optimized | Silent Aim Rate-Limited")
