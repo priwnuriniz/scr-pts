@@ -1,4 +1,4 @@
--- STRXcahts v28-FINAL | ESP + FOV + Aimbot fixed
+-- STRXcahts v29-TP | TP tab + Camera FOV fix
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 local Players           = game:GetService("Players")
@@ -65,6 +65,12 @@ local listeningForBind = nil
 local listeningForAimTrigger = false
 local keybindButtons = {}
 local activeSlider = nil
+
+-- YENİ: TP keybind state
+local tpAuraKeybind = nil
+local lookTpKeybind = nil
+local listeningForTpAuraKey = false
+local listeningForLookTpKey = false
 
 -- ============ HELPERS ============
 local function getRGBColor()
@@ -258,6 +264,48 @@ local function goBack()
     if savedPosition then teleportCharacterTo(savedPosition); savedPosition = nil end
 end
 
+-- YENİ: TP Aura (rastgele oyuncuya ışınlan)
+local function randomPlayerTp()
+    local _, myHrp = safeCharacter()
+    if not myHrp then return end
+    local others = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if hrp and hum and hum.Health > 0 then
+                table.insert(others, p)
+            end
+        end
+    end
+    if #others == 0 then return end
+    local target = others[math.random(1, #others)]
+    local targetHrp = target.Character:FindFirstChild("HumanoidRootPart")
+    if targetHrp then
+        savedPosition = myHrp.CFrame
+        local angle = math.random() * math.pi * 2
+        local dist = 4
+        local offset = Vector3.new(math.cos(angle) * dist, 0, math.sin(angle) * dist)
+        teleportCharacterTo(CFrame.new(targetHrp.Position + offset + Vector3.new(0, 3, 0)))
+    end
+end
+
+-- YENİ: Baktığın yere ışınlan (crosshair merkezi)
+local function lookTp()
+    local _, hrp = safeCharacter()
+    if not hrp then return end
+    local vp = Camera.ViewportSize
+    local ray = Camera:ViewportPointToRay(vp.X / 2, vp.Y / 2)
+    local p = RaycastParams.new()
+    p.FilterDescendantsInstances = {LocalPlayer.Character}
+    p.FilterType = Enum.RaycastFilterType.Exclude
+    local hit = workspace:Raycast(ray.Origin, ray.Direction * 5000, p)
+    if hit then
+        savedPosition = hrp.CFrame
+        teleportCharacterTo(CFrame.new(hit.Position + Vector3.new(0, 3, 0)))
+    end
+end
+
 -- ============ HITBOX ============
 local function hitboxLoop()
     if hitboxLoopActive then return end
@@ -319,9 +367,9 @@ end
 
 local ScreenGui   = newScreenGui("STRXcahtsMenu", 50)
 local ESPGui      = newScreenGui("STRX_ESPGui", 6)
-ESPGui.IgnoreGuiInset = true          -- FIX: ESP kayması
+ESPGui.IgnoreGuiInset = true
 local FOVGui      = newScreenGui("STRX_FOVGui", 5)
-FOVGui.IgnoreGuiInset = true          -- FIX: FOV kayması
+FOVGui.IgnoreGuiInset = true
 local WatermarkGui= newScreenGui("STRX_Watermark", 100)
 
 local FOVFrame = Instance.new("Frame", FOVGui)
@@ -334,7 +382,6 @@ local FOVStroke = Instance.new("UIStroke", FOVFrame)
 FOVStroke.Color = Color3.fromRGB(0, 255, 100)
 FOVStroke.Thickness = 2
 
--- Watermark
 local wmFrame = Instance.new("Frame", WatermarkGui)
 wmFrame.Size = UDim2.new(0, 180, 0, 25)
 wmFrame.Position = UDim2.new(1, -190, 0, 10)
@@ -496,7 +543,8 @@ fpsLbl.TextSize = 12
 fpsLbl.TextXAlignment = Enum.TextXAlignment.Right
 fpsLbl.ZIndex = 3
 
-local tabNames = {"Player","ESP","Aimbot","Ekstra","Ayarlar"}
+-- YENİ: TP sekmesi eklendi
+local tabNames = {"Player","ESP","Aimbot","TP","Ekstra","Ayarlar"}
 local tabs = {}
 local tabHolder = Instance.new("Frame", MainFrame)
 tabHolder.Size = UDim2.new(1,-30,0,34)
@@ -589,6 +637,37 @@ local function makeToggle(parent, text, y, callback, keybindId, syncId)
     return {setVisual = setVisual, getState = function() return on end, button = onBtn}
 end
 
+-- YENİ: sadece keybind atama satırı (toggle YOK)
+local function makeKeybindAction(parent, text, y)
+    local f = Instance.new("Frame", parent)
+    f.Size = UDim2.new(0,320,0,34)
+    f.Position = UDim2.new(0,8,0,y)
+    f.BackgroundColor3 = Color3.fromRGB(28,28,36)
+    f.ZIndex = 2
+    Instance.new("UICorner", f).CornerRadius = UDim.new(0,7)
+    local lbl = Instance.new("TextLabel", f)
+    lbl.Size = UDim2.new(1,-130,1,0)
+    lbl.Position = UDim2.new(0,12,0,0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = Color3.new(1,1,1)
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 13
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.ZIndex = 2
+    local kbBtn = Instance.new("TextButton", f)
+    kbBtn.Size = UDim2.new(0,100,0,22)
+    kbBtn.Position = UDim2.new(1,-112,0.5,-11)
+    kbBtn.BackgroundColor3 = Color3.fromRGB(45,45,55)
+    kbBtn.Text = "Ata"
+    kbBtn.TextColor3 = Color3.new(1,1,1)
+    kbBtn.Font = Enum.Font.GothamBold
+    kbBtn.TextSize = 10
+    kbBtn.ZIndex = 2
+    Instance.new("UICorner", kbBtn).CornerRadius = UDim.new(0,5)
+    return kbBtn
+end
+
 local function makeSlider(parent, labelText, minV, maxV, default, y, onChanged)
     local holder = Instance.new("Frame", parent)
     holder.Size = UDim2.new(0,320,0,48)
@@ -675,6 +754,7 @@ end
 local playerPage  = makePage()
 local espPage     = makePage()
 local aimbotPage  = makePage()
+local tpPage      = makePage()   -- YENİ
 local extraPage   = makePage()
 local settingsPage= makePage()
 
@@ -814,6 +894,36 @@ sfBtn.MouseButton1Click:Connect(function()
     sfBtn.BackgroundColor3 = showFOVCircle and Color3.fromRGB(0,180,90) or Color3.fromRGB(255,140,0)
 end)
 
+-- ============ TP SEKMESİ (YENİ) ============
+local tpAuraKbBtn = makeKeybindAction(tpPage, "TP Aura (Rastgele Oyuncu)", 10)
+tpAuraKbBtn.MouseButton1Click:Connect(function()
+    listeningForTpAuraKey = true
+    tpAuraKbBtn.Text = "..."
+end)
+
+local lookTpKbBtn = makeKeybindAction(tpPage, "Baktigin Yere Isinlan", 50)
+lookTpKbBtn.MouseButton1Click:Connect(function()
+    listeningForLookTpKey = true
+    lookTpKbBtn.Text = "..."
+end)
+
+-- TP sayfasında geri dön butonu
+makeButton(tpPage, "Geri Don (Son Isinlanmadan)", 8, 100, 320, 35, Color3.fromRGB(200,100,60), goBack)
+
+-- Bilgi label
+local tpInfo = Instance.new("TextLabel", tpPage)
+tpInfo.Size = UDim2.new(0,320,0,60)
+tpInfo.Position = UDim2.new(0,8,0,145)
+tpInfo.BackgroundColor3 = Color3.fromRGB(20,20,26)
+tpInfo.BackgroundTransparency = 0.3
+tpInfo.Text = "Tuş atamak için 'Ata' butonuna tıkla,\nsonra istediğin tuşa bas. Her basışta tetiklenir."
+tpInfo.TextColor3 = Color3.fromRGB(200,200,200)
+tpInfo.Font = Enum.Font.Gotham
+tpInfo.TextSize = 11
+tpInfo.TextWrapped = true
+tpInfo.ZIndex = 2
+Instance.new("UICorner", tpInfo).CornerRadius = UDim.new(0,7)
+
 -- EKSTRA
 makeToggle(extraPage, "Tikla-Isinlan", 10, function(s) clickTpEnabled = s end, "clickTp")
 makeToggle(extraPage, "Kamera FOV Ac/Kapat", 50, function(s)
@@ -829,8 +939,8 @@ end)
 makeToggle(settingsPage, "RGB Renk Modu", 10, function(s) rgbEnabled = s end)
 makeToggle(settingsPage, "FPS Sayaci", 50, function(s) showFps = s end)
 
--- PAGE SWITCH
-local pages = {Player=playerPage, ESP=espPage, Aimbot=aimbotPage, Ekstra=extraPage, Ayarlar=settingsPage}
+-- PAGE SWITCH (TP eklendi)
+local pages = {Player=playerPage, ESP=espPage, Aimbot=aimbotPage, TP=tpPage, Ekstra=extraPage, Ayarlar=settingsPage}
 local activeTab = "Player"
 local function showPage(name)
     activeTab = name
@@ -853,8 +963,9 @@ track(UserInputService.InputEnded:Connect(function(i)
     end
 end))
 
--- INPUT
+-- INPUT (YENİ: TP keybind listener + trigger)
 track(UserInputService.InputBegan:Connect(function(input, gp)
+    -- Keybind atama dinleyicileri (gp kontrolünden önce)
     if listeningForBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
             local id = listeningForBind
@@ -877,7 +988,35 @@ track(UserInputService.InputBegan:Connect(function(input, gp)
         end
         return
     end
+    if listeningForTpAuraKey then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            tpAuraKeybind = input.KeyCode
+            tpAuraKbBtn.Text = input.KeyCode.Name
+            listeningForTpAuraKey = false
+        end
+        return
+    end
+    if listeningForLookTpKey then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            lookTpKeybind = input.KeyCode
+            lookTpKbBtn.Text = input.KeyCode.Name
+            listeningForLookTpKey = false
+        end
+        return
+    end
+
     if gp then return end
+
+    -- YENİ: TP tetikleyicileri
+    if tpAuraKeybind and input.KeyCode == tpAuraKeybind then
+        randomPlayerTp()
+        return
+    end
+    if lookTpKeybind and input.KeyCode == lookTpKeybind then
+        lookTp()
+        return
+    end
+
     if clickTpEnabled and input.UserInputType == Enum.UserInputType.MouseButton1 and not ScreenGui.Enabled then
         teleportToMouse()
     end
@@ -910,7 +1049,6 @@ track(LocalPlayer.Idled:Connect(function()
     end
 end))
 
--- RESPAWN
 track(LocalPlayer.CharacterAdded:Connect(function(char)
     task.wait(0.35)
     captureOriginal(char)
@@ -945,6 +1083,13 @@ track(RunService.RenderStepped:Connect(function()
             fpsLbl.Text = cur.." FPS"
             wmText.Text = "STRXCHATS | "..cur.." FPS"
         end
+    end
+end))
+
+-- YENİ: Camera FOV zorla uygula (oyun sıfırlıyordu)
+track(RunService.RenderStepped:Connect(function()
+    if camFovEnabled and math.abs(Camera.FieldOfView - camFovValue) > 0.1 then
+        Camera.FieldOfView = camFovValue
     end
 end))
 
@@ -1049,14 +1194,11 @@ task.spawn(function()
     end
 end)
 
--- Eski aimbot target loop SİLİNDİ (RenderStep içinde her frame tazeleniyor)
-
--- ============ AIMBOT RENDERSTEP (FINAL) ============
+-- ============ AIMBOT RENDERSTEP ============
 local aimWasScriptable = false
 local aimCamOffset = Vector3.zero
 
 RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value + 1, function()
-    -- FOV çember
     if showFOVCircle then
         FOVFrame.Visible = true
         local vp = Camera.ViewportSize
@@ -1076,7 +1218,6 @@ RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value
         return
     end
 
-    -- Her frame hedef tazele (takılma önleme)
     if aimbotEnabled then
         aimbotTarget = getAimbotTarget()
     else
@@ -1086,7 +1227,6 @@ RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value
     local keyHeld = aimbotEnabled and isAimbotTriggered()
     local hasTarget = aimbotTarget and aimbotTarget.Parent
 
-    -- Sadece tuş basılı VE hedef var ise kamera kilitle
     if keyHeld and hasTarget then
         if not aimWasScriptable then
             aimWasScriptable = true
@@ -1107,7 +1247,6 @@ RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value
             hrp.CFrame = hrp.CFrame:Lerp(rotCF, math.min(1, alpha * 2))
         end
     else
-        -- Hedef yok veya tuş bırakıldı → Custom'a dön
         if aimWasScriptable then
             aimWasScriptable = false
             pcall(function() Camera.CameraType = Enum.CameraType.Custom end)
@@ -1118,4 +1257,4 @@ end)
 
 captureOriginal(LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait())
 
-print("STRXcahts v28-FINAL | ESP+FOV+Aimbot fixed")
+print("STRXcahts v29-TP | TP tab + Camera FOV fix")
