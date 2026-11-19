@@ -1,4 +1,4 @@
--- STRXcahts v29-TP | TP tab + Camera FOV fix
+-- STRXcahts v31-BOT2 | per-system bot detect toggle
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 local Players           = game:GetService("Players")
@@ -36,6 +36,7 @@ local hitboxEnabled, hitboxSize = false, 5
 local camFovEnabled, camFovValue = false, 70
 local espEnabled = false
 local espShowName, espShowHealth, espShowDistance = true, true, true
+local espBotDetect = false          -- YENİ
 local espVisibleColor = Color3.fromRGB(0, 255, 100)
 local espHiddenColor  = Color3.fromRGB(255, 60, 60)
 local espMaxDistance  = 1000
@@ -47,6 +48,7 @@ local aimbotSmoothness = 3
 local aimbotWallCheck = true
 local aimbotAimPart = "Head"
 local aimbotTarget = nil
+local aimbotBotDetect = false       -- YENİ
 local showFOVCircle = true
 local savedPosition = nil
 local flyBV, flyBG, flyConn
@@ -65,12 +67,59 @@ local listeningForBind = nil
 local listeningForAimTrigger = false
 local keybindButtons = {}
 local activeSlider = nil
-
--- YENİ: TP keybind state
 local tpAuraKeybind = nil
 local lookTpKeybind = nil
 local listeningForTpAuraKey = false
 local listeningForLookTpKey = false
+local tpAuraBotDetect = false       -- YENİ
+
+-- ============ BOT/MONSTER CACHE ============
+local botCache = {}
+local botCacheTime = 0
+
+local function isBotCharacter(model)
+    if not model or not model:IsA("Model") then return false end
+    if model == LocalPlayer.Character then return false end
+    if Players:GetPlayerFromCharacter(model) then return false end
+    local hum = model:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health <= 0 then return false end
+    local hrp = model:FindFirstChild("HumanoidRootPart")
+    local head = model:FindFirstChild("Head")
+    local torso = model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso")
+    if hrp then return true end
+    if head and torso then return true end
+    return false
+end
+
+local function scanModelRecursive(model, out)
+    if model:IsA("Model") and isBotCharacter(model) then
+        table.insert(out, model)
+        return
+    end
+    for _, child in ipairs(model:GetChildren()) do
+        if child:IsA("Model") then
+            scanModelRecursive(child, out)
+        end
+    end
+end
+
+local function refreshBotCache()
+    if tick() - botCacheTime < 0.2 then return end
+    botCacheTime = tick()
+    local newCache = {}
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if obj:IsA("Model") then
+            scanModelRecursive(obj, newCache)
+        end
+    end
+    botCache = newCache
+end
+
+local function getDisplayName(char)
+    local p = Players:GetPlayerFromCharacter(char)
+    if p then return p.Name end
+    return char.Name
+end
 
 -- ============ HELPERS ============
 local function getRGBColor()
@@ -154,20 +203,17 @@ local function startFly()
     flyEnabled = true
     destroyFlyPhysics()
     hum.PlatformStand = true
-
     flyBV = Instance.new("BodyVelocity")
     flyBV.Name = "STRX_FlyBV"
     flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
     flyBV.Velocity = Vector3.zero
     flyBV.Parent = hrp
-
     flyBG = Instance.new("BodyGyro")
     flyBG.Name = "STRX_FlyBG"
     flyBG.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
     flyBG.P = 3000
     flyBG.D = 100
     flyBG.Parent = hrp
-
     flyConn = RunService.RenderStepped:Connect(function(dt)
         if not flyEnabled then return end
         local _, r = safeCharacter()
@@ -190,7 +236,6 @@ local function startFly()
             end
         end
     end)
-
     if toggleSync.fly then toggleSync.fly.setVisual(true) end
 end
 
@@ -264,33 +309,41 @@ local function goBack()
     if savedPosition then teleportCharacterTo(savedPosition); savedPosition = nil end
 end
 
--- YENİ: TP Aura (rastgele oyuncuya ışınlan)
+-- TP Aura (bot detect dahil)
 local function randomPlayerTp()
     local _, myHrp = safeCharacter()
     if not myHrp then return end
-    local others = {}
+    local candidates = {}
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character then
             local hrp = p.Character:FindFirstChild("HumanoidRootPart")
             local hum = p.Character:FindFirstChildOfClass("Humanoid")
             if hrp and hum and hum.Health > 0 then
-                table.insert(others, p)
+                table.insert(candidates, hrp)
             end
         end
     end
-    if #others == 0 then return end
-    local target = others[math.random(1, #others)]
-    local targetHrp = target.Character:FindFirstChild("HumanoidRootPart")
-    if targetHrp then
-        savedPosition = myHrp.CFrame
-        local angle = math.random() * math.pi * 2
-        local dist = 4
-        local offset = Vector3.new(math.cos(angle) * dist, 0, math.sin(angle) * dist)
-        teleportCharacterTo(CFrame.new(targetHrp.Position + offset + Vector3.new(0, 3, 0)))
+    if tpAuraBotDetect then
+        refreshBotCache()
+        for _, model in ipairs(botCache) do
+            local hrp = model:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local hum = model:FindFirstChildOfClass("Humanoid")
+                if not hum or hum.Health > 0 then
+                    table.insert(candidates, hrp)
+                end
+            end
+        end
     end
+    if #candidates == 0 then return end
+    local targetHrp = candidates[math.random(1, #candidates)]
+    savedPosition = myHrp.CFrame
+    local angle = math.random() * math.pi * 2
+    local dist = 4
+    local offset = Vector3.new(math.cos(angle) * dist, 0, math.sin(angle) * dist)
+    teleportCharacterTo(CFrame.new(targetHrp.Position + offset + Vector3.new(0, 3, 0)))
 end
 
--- YENİ: Baktığın yere ışınlan (crosshair merkezi)
 local function lookTp()
     local _, hrp = safeCharacter()
     if not hrp then return end
@@ -400,11 +453,10 @@ wmText.Font = Enum.Font.GothamBold
 wmText.TextSize = 12
 
 -- ============ ESP ============
-local function createESPFor(player)
-    if player == LocalPlayer then return end
-    if espData[player] then
+local function createESPForModel(char)
+    if espData[char] then
         for _, k in ipairs({"box","nameLabel","distLabel","hpBarBg"}) do
-            if espData[player][k] then espData[player][k]:Destroy() end
+            if espData[char][k] then espData[char][k]:Destroy() end
         end
     end
     local box = Instance.new("Frame", ESPGui)
@@ -423,7 +475,7 @@ local function createESPFor(player)
     hpFill.Position = UDim2.new(0,0,1,0)
     local nameLbl = Instance.new("TextLabel", ESPGui)
     nameLbl.BackgroundTransparency = 1
-    nameLbl.Text = player.Name
+    nameLbl.Text = getDisplayName(char)
     nameLbl.TextColor3 = Color3.new(1,1,1)
     nameLbl.Font = Enum.Font.GothamBold
     nameLbl.TextSize = 14
@@ -435,15 +487,15 @@ local function createESPFor(player)
     distLbl.TextSize = 12
     distLbl.TextStrokeTransparency = 0
     distLbl.Visible = false
-    espData[player] = {box=box, stroke=boxStroke, nameLabel=nameLbl, distLabel=distLbl, hpBarBg=hpBarBg, hpFill=hpFill}
+    espData[char] = {box=box, stroke=boxStroke, nameLabel=nameLbl, distLabel=distLbl, hpBarBg=hpBarBg, hpFill=hpFill}
 end
 
-local function removeESPFor(player)
-    if espData[player] then
+local function removeESPForModel(char)
+    if espData[char] then
         for _, k in ipairs({"box","nameLabel","distLabel","hpBarBg"}) do
-            if espData[player][k] then espData[player][k]:Destroy() end
+            if espData[char][k] then espData[char][k]:Destroy() end
         end
-        espData[player] = nil
+        espData[char] = nil
     end
 end
 
@@ -456,27 +508,37 @@ local function getAimbotTarget()
     local center = Camera.ViewportSize / 2
     local myChar = LocalPlayer.Character
     if not myChar then return nil end
+
+    local allChars = {}
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer then
-            local char = p.Character
-            if char then
-                local hum = char:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Health > 0 then
-                    local targetPart = char:FindFirstChild(aimbotAimPart) or char:FindFirstChild("HumanoidRootPart")
-                    if targetPart then
-                        local sp, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-                        if onScreen then
-                            local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-                            if d <= aimbotFOV then
-                                local ok = true
-                                if aimbotWallCheck then
-                                    aimRayParams.FilterDescendantsInstances = {char, myChar}
-                                    local r = workspace:Raycast(Camera.CFrame.Position, targetPart.Position - Camera.CFrame.Position, aimRayParams)
-                                    if r then ok = false end
-                                end
-                                if ok and d < shortest then shortest, closest = d, targetPart end
-                            end
+        if p ~= LocalPlayer and p.Character then
+            table.insert(allChars, p.Character)
+        end
+    end
+    if aimbotBotDetect then
+        refreshBotCache()
+        for _, model in ipairs(botCache) do
+            table.insert(allChars, model)
+        end
+    end
+
+    for _, char in ipairs(allChars) do
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local alive = (hum == nil) or (hum.Health > 0)
+        if alive then
+            local targetPart = char:FindFirstChild(aimbotAimPart) or char:FindFirstChild("HumanoidRootPart")
+            if targetPart then
+                local sp, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                if onScreen then
+                    local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+                    if d <= aimbotFOV then
+                        local ok = true
+                        if aimbotWallCheck then
+                            aimRayParams.FilterDescendantsInstances = {char, myChar}
+                            local r = workspace:Raycast(Camera.CFrame.Position, targetPart.Position - Camera.CFrame.Position, aimRayParams)
+                            if r then ok = false end
                         end
+                        if ok and d < shortest then shortest, closest = d, targetPart end
                     end
                 end
             end
@@ -543,7 +605,6 @@ fpsLbl.TextSize = 12
 fpsLbl.TextXAlignment = Enum.TextXAlignment.Right
 fpsLbl.ZIndex = 3
 
--- YENİ: TP sekmesi eklendi
 local tabNames = {"Player","ESP","Aimbot","TP","Ekstra","Ayarlar"}
 local tabs = {}
 local tabHolder = Instance.new("Frame", MainFrame)
@@ -637,7 +698,6 @@ local function makeToggle(parent, text, y, callback, keybindId, syncId)
     return {setVisual = setVisual, getState = function() return on end, button = onBtn}
 end
 
--- YENİ: sadece keybind atama satırı (toggle YOK)
 local function makeKeybindAction(parent, text, y)
     local f = Instance.new("Frame", parent)
     f.Size = UDim2.new(0,320,0,34)
@@ -754,7 +814,7 @@ end
 local playerPage  = makePage()
 local espPage     = makePage()
 local aimbotPage  = makePage()
-local tpPage      = makePage()   -- YENİ
+local tpPage      = makePage()
 local extraPage   = makePage()
 local settingsPage= makePage()
 
@@ -776,7 +836,14 @@ makeToggle(playerPage, "Anti-AFK", 495, function(s) antiAfkEnabled = s end)
 -- ESP
 makeToggle(espPage, "ESP Ac/Kapat", 10, function(s)
     espEnabled = s
-    if s then for _, p in ipairs(Players:GetPlayers()) do createESPFor(p) end
+    if s then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character then createESPForModel(p.Character) end
+        end
+        if espBotDetect then
+            refreshBotCache()
+            for _, model in ipairs(botCache) do createESPForModel(model) end
+        end
     else
         for _, data in pairs(espData) do
             if data.box then data.box.Visible = false end
@@ -790,6 +857,24 @@ makeToggle(espPage, "Isim Goster", 50, function(s) espShowName = s end)
 makeToggle(espPage, "Can Goster", 90, function(s) espShowHealth = s end)
 makeToggle(espPage, "Mesafe Goster", 130, function(s) espShowDistance = s end)
 makeSlider(espPage, "Max Mesafe", 50, 3000, espMaxDistance, 170, function(v) espMaxDistance = v end)
+
+-- YENİ: ESP Bot Detect toggle
+makeToggle(espPage, "Botlari Algila", 230, function(s)
+    espBotDetect = s
+    if not s then
+        -- botları temizle (oyuncular kalsın)
+        for model, _ in pairs(espData) do
+            if not Players:GetPlayerFromCharacter(model) then
+                removeESPForModel(model)
+            end
+        end
+    elseif espEnabled then
+        refreshBotCache()
+        for _, model in ipairs(botCache) do
+            if not espData[model] then createESPForModel(model) end
+        end
+    end
+end)
 
 -- AIMBOT
 makeToggle(aimbotPage, "Aimbot Ac/Kapat", 10, function(s) aimbotEnabled = s; if not s then aimbotTarget = nil end end, "aimbot")
@@ -894,8 +979,11 @@ sfBtn.MouseButton1Click:Connect(function()
     sfBtn.BackgroundColor3 = showFOVCircle and Color3.fromRGB(0,180,90) or Color3.fromRGB(255,140,0)
 end)
 
--- ============ TP SEKMESİ (YENİ) ============
-local tpAuraKbBtn = makeKeybindAction(tpPage, "TP Aura (Rastgele Oyuncu)", 10)
+-- YENİ: Aimbot Bot Detect toggle
+makeToggle(aimbotPage, "Botlari Algila", 364, function(s) aimbotBotDetect = s end)
+
+-- TP
+local tpAuraKbBtn = makeKeybindAction(tpPage, "TP Aura (Rastgele)", 10)
 tpAuraKbBtn.MouseButton1Click:Connect(function()
     listeningForTpAuraKey = true
     tpAuraKbBtn.Text = "..."
@@ -907,13 +995,14 @@ lookTpKbBtn.MouseButton1Click:Connect(function()
     lookTpKbBtn.Text = "..."
 end)
 
--- TP sayfasında geri dön butonu
 makeButton(tpPage, "Geri Don (Son Isinlanmadan)", 8, 100, 320, 35, Color3.fromRGB(200,100,60), goBack)
 
--- Bilgi label
+-- YENİ: TP Aura Bot Detect toggle
+makeToggle(tpPage, "Botlari Algila (TP Aura)", 145, function(s) tpAuraBotDetect = s end)
+
 local tpInfo = Instance.new("TextLabel", tpPage)
 tpInfo.Size = UDim2.new(0,320,0,60)
-tpInfo.Position = UDim2.new(0,8,0,145)
+tpInfo.Position = UDim2.new(0,8,0,190)
 tpInfo.BackgroundColor3 = Color3.fromRGB(20,20,26)
 tpInfo.BackgroundTransparency = 0.3
 tpInfo.Text = "Tuş atamak için 'Ata' butonuna tıkla,\nsonra istediğin tuşa bas. Her basışta tetiklenir."
@@ -939,7 +1028,7 @@ end)
 makeToggle(settingsPage, "RGB Renk Modu", 10, function(s) rgbEnabled = s end)
 makeToggle(settingsPage, "FPS Sayaci", 50, function(s) showFps = s end)
 
--- PAGE SWITCH (TP eklendi)
+-- PAGE SWITCH
 local pages = {Player=playerPage, ESP=espPage, Aimbot=aimbotPage, TP=tpPage, Ekstra=extraPage, Ayarlar=settingsPage}
 local activeTab = "Player"
 local function showPage(name)
@@ -963,9 +1052,8 @@ track(UserInputService.InputEnded:Connect(function(i)
     end
 end))
 
--- INPUT (YENİ: TP keybind listener + trigger)
+-- INPUT
 track(UserInputService.InputBegan:Connect(function(input, gp)
-    -- Keybind atama dinleyicileri (gp kontrolünden önce)
     if listeningForBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
             local id = listeningForBind
@@ -1004,10 +1092,7 @@ track(UserInputService.InputBegan:Connect(function(input, gp)
         end
         return
     end
-
     if gp then return end
-
-    -- YENİ: TP tetikleyicileri
     if tpAuraKeybind and input.KeyCode == tpAuraKeybind then
         randomPlayerTp()
         return
@@ -1016,7 +1101,6 @@ track(UserInputService.InputBegan:Connect(function(input, gp)
         lookTp()
         return
     end
-
     if clickTpEnabled and input.UserInputType == Enum.UserInputType.MouseButton1 and not ScreenGui.Enabled then
         teleportToMouse()
     end
@@ -1062,14 +1146,22 @@ end))
 -- PLAYER HANDLERS
 local function hookPlayer(p)
     if p == LocalPlayer then return end
-    track(p.CharacterAdded:Connect(function()
-        if espEnabled then removeESPFor(p) task.wait(0.5) createESPFor(p) end
+    track(p.CharacterAdded:Connect(function(char)
+        if espEnabled then
+            if espData[char] then removeESPForModel(char) end
+            task.wait(0.5)
+            createESPForModel(char)
+        end
     end))
-    if espEnabled then createESPFor(p) end
+    if espEnabled and p.Character then createESPForModel(p.Character) end
 end
 for _, p in ipairs(Players:GetPlayers()) do hookPlayer(p) end
 track(Players.PlayerAdded:Connect(hookPlayer))
-track(Players.PlayerRemoving:Connect(function(p) removeESPFor(p) end))
+track(Players.PlayerRemoving:Connect(function(p)
+    if p.Character and espData[p.Character] then
+        removeESPForModel(p.Character)
+    end
+end))
 
 -- LOOPS
 local fpsCounter, fpsTimer = 0, tick()
@@ -1086,7 +1178,6 @@ track(RunService.RenderStepped:Connect(function()
     end
 end))
 
--- YENİ: Camera FOV zorla uygula (oyun sıfırlıyordu)
 track(RunService.RenderStepped:Connect(function()
     if camFovEnabled and math.abs(Camera.FieldOfView - camFovValue) > 0.1 then
         Camera.FieldOfView = camFovValue
@@ -1126,57 +1217,69 @@ task.spawn(function()
     end
 end)
 
+-- ESP loop (conditional bots)
 task.spawn(function()
     while true do
         task.wait(espEnabled and 0.05 or 0.4)
         if espEnabled then
             local _, myPos = safeCharacter()
             if myPos then
+                local allChars = {}
                 for _, p in ipairs(Players:GetPlayers()) do
                     if p ~= LocalPlayer and p.Character then
-                        if not espData[p] then createESPFor(p) end
-                        local char = p.Character
-                        local hum  = char:FindFirstChildOfClass("Humanoid")
-                        local head = char:FindFirstChild("Head")
-                        local hrp  = char:FindFirstChild("HumanoidRootPart")
-                        local data = espData[p]
-                        if data then
-                            if hum and hum.Health > 0 and head and hrp then
-                                local dist = (hrp.Position - myPos.Position).Magnitude
-                                if dist <= espMaxDistance then
-                                    local headScreen, on1 = Camera:WorldToViewportPoint(head.Position + Vector3.new(0,0.5,0))
-                                    local footScreen, on2 = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0,2.5,0))
-                                    if on1 or on2 then
-                                        local height = math.abs(headScreen.Y - footScreen.Y)
-                                        local width = height * 0.6
-                                        data.box.Visible = true
-                                        data.box.Size = UDim2.new(0,width,0,height)
-                                        data.box.Position = UDim2.new(0, headScreen.X - width/2, 0, headScreen.Y)
-                                        local visible = isPlayerVisible(char)
-                                        local color = visible and espVisibleColor or espHiddenColor
-                                        data.stroke.Color = color
-                                        data.nameLabel.Visible = espShowName
-                                        if espShowName then
-                                            data.nameLabel.Position = UDim2.new(0, headScreen.X - 60, 0, headScreen.Y - 18)
-                                            data.nameLabel.Size = UDim2.new(0, 120, 0, 15)
-                                            data.nameLabel.TextColor3 = color
-                                        end
-                                        data.distLabel.Visible = espShowDistance
-                                        if espShowDistance then
-                                            data.distLabel.Position = UDim2.new(0, headScreen.X - 60, 0, headScreen.Y + height + 2)
-                                            data.distLabel.Size = UDim2.new(0, 120, 0, 15)
-                                            data.distLabel.Text = "["..math.floor(dist).."m]"
-                                            data.distLabel.TextColor3 = color
-                                        end
-                                        data.hpBarBg.Visible = espShowHealth
-                                        if espShowHealth then
-                                            local hpPct = math.clamp(hum.Health/hum.MaxHealth, 0, 1)
-                                            data.hpFill.Size = UDim2.new(1,0,hpPct,0)
-                                            data.hpFill.BackgroundColor3 = Color3.fromRGB(math.floor(255*(1-hpPct)), math.floor(255*hpPct), 0)
-                                        end
-                                    else
-                                        data.box.Visible=false; data.nameLabel.Visible=false
-                                        data.distLabel.Visible=false; data.hpBarBg.Visible=false
+                        table.insert(allChars, p.Character)
+                    end
+                end
+                if espBotDetect then
+                    refreshBotCache()
+                    for _, model in ipairs(botCache) do
+                        table.insert(allChars, model)
+                    end
+                end
+
+                local seen = {}
+                for _, char in ipairs(allChars) do
+                    seen[char] = true
+                    if not espData[char] then createESPForModel(char) end
+                    local hum = char:FindFirstChildOfClass("Humanoid")
+                    local head = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+                    local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head")
+                    local data = espData[char]
+                    if data then
+                        local alive = (hum == nil) or (hum.Health > 0)
+                        if alive and head and hrp then
+                            local dist = (hrp.Position - myPos.Position).Magnitude
+                            if dist <= espMaxDistance then
+                                local headScreen, on1 = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
+                                local footScreen, on2 = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 2.5, 0))
+                                if on1 or on2 then
+                                    local height = math.abs(headScreen.Y - footScreen.Y)
+                                    local width = height * 0.6
+                                    data.box.Visible = true
+                                    data.box.Size = UDim2.new(0, width, 0, height)
+                                    data.box.Position = UDim2.new(0, headScreen.X - width/2, 0, headScreen.Y)
+                                    local visible = isPlayerVisible(char)
+                                    local color = visible and espVisibleColor or espHiddenColor
+                                    data.stroke.Color = color
+                                    data.nameLabel.Visible = espShowName
+                                    if espShowName then
+                                        data.nameLabel.Position = UDim2.new(0, headScreen.X - 60, 0, headScreen.Y - 18)
+                                        data.nameLabel.Size = UDim2.new(0, 120, 0, 15)
+                                        data.nameLabel.TextColor3 = color
+                                    end
+                                    data.distLabel.Visible = espShowDistance
+                                    if espShowDistance then
+                                        data.distLabel.Position = UDim2.new(0, headScreen.X - 60, 0, headScreen.Y + height + 2)
+                                        data.distLabel.Size = UDim2.new(0, 120, 0, 15)
+                                        data.distLabel.Text = "["..math.floor(dist).."m]"
+                                        data.distLabel.TextColor3 = color
+                                    end
+                                    -- Can barı sadece Humanoid varsa
+                                    data.hpBarBg.Visible = espShowHealth and (hum ~= nil)
+                                    if espShowHealth and hum then
+                                        local hpPct = math.clamp(hum.Health/hum.MaxHealth, 0, 1)
+                                        data.hpFill.Size = UDim2.new(1,0,hpPct,0)
+                                        data.hpFill.BackgroundColor3 = Color3.fromRGB(math.floor(255*(1-hpPct)), math.floor(255*hpPct), 0)
                                     end
                                 else
                                     data.box.Visible=false; data.nameLabel.Visible=false
@@ -1186,7 +1289,16 @@ task.spawn(function()
                                 data.box.Visible=false; data.nameLabel.Visible=false
                                 data.distLabel.Visible=false; data.hpBarBg.Visible=false
                             end
+                        else
+                            data.box.Visible=false; data.nameLabel.Visible=false
+                            data.distLabel.Visible=false; data.hpBarBg.Visible=false
                         end
+                    end
+                end
+                -- orphan cleanup
+                for model, _ in pairs(espData) do
+                    if not seen[model] then
+                        removeESPForModel(model)
                     end
                 end
             end
@@ -1194,7 +1306,7 @@ task.spawn(function()
     end
 end)
 
--- ============ AIMBOT RENDERSTEP ============
+-- AIMBOT RENDERSTEP
 local aimWasScriptable = false
 local aimCamOffset = Vector3.zero
 
@@ -1234,12 +1346,10 @@ RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value
             Camera.CameraType = Enum.CameraType.Scriptable
             if hum then hum.AutoRotate = false end
         end
-
         local alpha = 1 / math.max(aimbotSmoothness, 1)
         local camPos = hrp.Position + aimCamOffset
         local desiredCF = CFrame.lookAt(camPos, aimbotTarget.Position)
         Camera.CFrame = Camera.CFrame:Lerp(desiredCF, alpha)
-
         local toTarget = aimbotTarget.Position - hrp.Position
         local flat = Vector3.new(toTarget.X, 0, toTarget.Z)
         if flat.Magnitude > 0.05 then
@@ -1257,4 +1367,4 @@ end)
 
 captureOriginal(LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait())
 
-print("STRXcahts v29-TP | TP tab + Camera FOV fix")
+print("STRXcahts v31-BOT2 | per-system bot detect + monster support")
