@@ -1,4 +1,4 @@
--- STRXcahts v32-HBOT | hitbox bot support
+-- STRXcahts v33- ESP/Aimbot/TP Aura
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 local Players           = game:GetService("Players")
@@ -33,13 +33,15 @@ local rgbEnabled = true
 local rgbHue = 0
 local showFps = true
 local hitboxEnabled, hitboxSize = false, 5
-local hitboxBotDetect = false       -- YENİ
+local hitboxBotDetect = false
 local camFovEnabled, camFovValue = false, 70
 local espEnabled = false
 local espShowName, espShowHealth, espShowDistance = true, true, true
 local espBotDetect = false
+local espIgnoreTeammates = false              -- YENİ
 local espVisibleColor = Color3.fromRGB(0, 255, 100)
 local espHiddenColor  = Color3.fromRGB(255, 60, 60)
+local espTeammateColor = Color3.fromRGB(80, 140, 255) -- YENİ
 local espMaxDistance  = 1000
 local espData = {}
 local aimbotEnabled = false
@@ -50,6 +52,7 @@ local aimbotWallCheck = true
 local aimbotAimPart = "Head"
 local aimbotTarget = nil
 local aimbotBotDetect = false
+local aimbotIgnoreTeammates = true            -- YENİ
 local showFOVCircle = true
 local savedPosition = nil
 local flyBV, flyBG, flyConn
@@ -73,6 +76,7 @@ local lookTpKeybind = nil
 local listeningForTpAuraKey = false
 local listeningForLookTpKey = false
 local tpAuraBotDetect = false
+local tpAuraIgnoreTeammates = true            -- YENİ
 
 -- ============ BOT/MONSTER CACHE ============
 local botCache = {}
@@ -120,6 +124,29 @@ local function getDisplayName(char)
     local p = Players:GetPlayerFromCharacter(char)
     if p then return p.Name end
     return char.Name
+end
+
+-- ============ TAKIM ARKADAŞI TESPİTİ (YENİ) ============
+local function isTeammate(player)
+    if not player or player == LocalPlayer then return true end
+    -- Yöntem 1: Player.Team (Roblox standart)
+    if LocalPlayer.Team and player.Team then
+        return LocalPlayer.Team == player.Team
+    end
+    -- Yöntem 2: TeamColor (Team object yoksa)
+    local neutralGrey = BrickColor.new("Medium stone grey")
+    if LocalPlayer.TeamColor and player.TeamColor then
+        if LocalPlayer.TeamColor == neutralGrey then return false end
+        return LocalPlayer.TeamColor == player.TeamColor
+    end
+    return false
+end
+
+-- Karakterin takım arkadaşı olup olmadığını döndürür (botlar hep düşman)
+local function isTeammateCharacter(char)
+    local p = Players:GetPlayerFromCharacter(char)
+    if not p then return false end -- bot/canavar → düşman
+    return isTeammate(p)
 end
 
 -- ============ HELPERS ============
@@ -316,10 +343,13 @@ local function randomPlayerTp()
     local candidates = {}
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character then
-            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
-            local hum = p.Character:FindFirstChildOfClass("Humanoid")
-            if hrp and hum and hum.Health > 0 then
-                table.insert(candidates, hrp)
+            local skip = tpAuraIgnoreTeammates and isTeammate(p)
+            if not skip then
+                local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                local hum = p.Character:FindFirstChildOfClass("Humanoid")
+                if hrp and hum and hum.Health > 0 then
+                    table.insert(candidates, hrp)
+                end
             end
         end
     end
@@ -359,12 +389,11 @@ local function lookTp()
     end
 end
 
--- ============ HITBOX (BOT DESTEKLİ) ============
+-- ============ HITBOX ============
 local function hitboxLoop()
     if hitboxLoopActive then return end
     hitboxLoopActive = true
     while hitboxEnabled do
-        -- Hedef listesi: oyuncular + (toggle açıksa) botlar
         local targets = {}
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LocalPlayer and p.Character then
@@ -523,7 +552,10 @@ local function getAimbotTarget()
     local allChars = {}
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character then
-            table.insert(allChars, p.Character)
+            local skip = aimbotIgnoreTeammates and isTeammate(p)
+            if not skip then
+                table.insert(allChars, p.Character)
+            end
         end
     end
     if aimbotBotDetect then
@@ -815,7 +847,7 @@ local function makePage()
     p.BackgroundTransparency = 1
     p.ScrollBarThickness = 4
     p.ScrollBarImageColor3 = Color3.fromRGB(255,140,0)
-    p.CanvasSize = UDim2.new(0,0,0,800)
+    p.CanvasSize = UDim2.new(0,0,0,900)
     p.ScrollingDirection = Enum.ScrollingDirection.Y
     p.Visible = false
     p.ZIndex = 2
@@ -881,6 +913,24 @@ makeToggle(espPage, "Botlari Algila", 230, function(s)
         refreshBotCache()
         for _, model in ipairs(botCache) do
             if not espData[model] then createESPForModel(model) end
+        end
+    end
+end)
+
+-- YENİ: ESP takım arkadaşlarını gizle
+makeToggle(espPage, "Takim Arkadaslarini Gizle", 270, function(s)
+    espIgnoreTeammates = s
+    if s then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character and isTeammate(p) then
+                removeESPForModel(p.Character)
+            end
+        end
+    elseif espEnabled then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character and not espData[p.Character] then
+                createESPForModel(p.Character)
+            end
         end
     end
 end)
@@ -989,7 +1039,12 @@ sfBtn.MouseButton1Click:Connect(function()
 end)
 
 makeToggle(aimbotPage, "Botlari Algila (Aimbot)", 364, function(s) aimbotBotDetect = s end)
-makeToggle(aimbotPage, "Hitbox Botlari Algila", 404, function(s) hitboxBotDetect = s end) -- YENİ
+makeToggle(aimbotPage, "Hitbox Botlari Algila", 404, function(s) hitboxBotDetect = s end)
+
+-- YENİ: Aimbot takım arkadaşlarını yoksay (default ON)
+local aimTeamToggle = makeToggle(aimbotPage, "Takim Arkadaslarini Yoksay", 444, function(s) aimbotIgnoreTeammates = s; aimbotTarget = nil end)
+aimTeamToggle.setVisual(true)
+aimbotIgnoreTeammates = true
 
 -- TP
 local tpAuraKbBtn = makeKeybindAction(tpPage, "TP Aura (Rastgele)", 10)
@@ -1008,12 +1063,17 @@ makeButton(tpPage, "Geri Don (Son Isinlanmadan)", 8, 100, 320, 35, Color3.fromRG
 
 makeToggle(tpPage, "Botlari Algila (TP Aura)", 145, function(s) tpAuraBotDetect = s end)
 
+-- YENİ: TP Aura takım arkadaşlarını yoksay (default ON)
+local tpTeamToggle = makeToggle(tpPage, "Takim Arkadaslarini Yoksay", 185, function(s) tpAuraIgnoreTeammates = s end)
+tpTeamToggle.setVisual(true)
+tpAuraIgnoreTeammates = true
+
 local tpInfo = Instance.new("TextLabel", tpPage)
-tpInfo.Size = UDim2.new(0,320,0,60)
-tpInfo.Position = UDim2.new(0,8,0,190)
+tpInfo.Size = UDim2.new(0,320,0,50)
+tpInfo.Position = UDim2.new(0,8,0,230)
 tpInfo.BackgroundColor3 = Color3.fromRGB(20,20,26)
 tpInfo.BackgroundTransparency = 0.3
-tpInfo.Text = "Tuş atamak için 'Ata' butonuna tıkla,\nsonra istediğin tuşa bas. Her basışta tetiklenir."
+tpInfo.Text = "Tuş atamak için 'Ata' butonuna tıkla.\nHer basışta tetiklenir."
 tpInfo.TextColor3 = Color3.fromRGB(200,200,200)
 tpInfo.Font = Enum.Font.Gotham
 tpInfo.TextSize = 11
@@ -1155,13 +1215,15 @@ end))
 local function hookPlayer(p)
     if p == LocalPlayer then return end
     track(p.CharacterAdded:Connect(function(char)
-        if espEnabled then
+        if espEnabled and not (espIgnoreTeammates and isTeammate(p)) then
             if espData[char] then removeESPForModel(char) end
             task.wait(0.5)
             createESPForModel(char)
         end
     end))
-    if espEnabled and p.Character then createESPForModel(p.Character) end
+    if espEnabled and p.Character and not (espIgnoreTeammates and isTeammate(p)) then
+        createESPForModel(p.Character)
+    end
 end
 for _, p in ipairs(Players:GetPlayers()) do hookPlayer(p) end
 track(Players.PlayerAdded:Connect(hookPlayer))
@@ -1225,7 +1287,7 @@ task.spawn(function()
     end
 end)
 
--- ESP loop
+-- ESP loop (takım arkadaşı filtresi + renk)
 task.spawn(function()
     while true do
         task.wait(espEnabled and 0.05 or 0.4)
@@ -1235,7 +1297,9 @@ task.spawn(function()
                 local allChars = {}
                 for _, p in ipairs(Players:GetPlayers()) do
                     if p ~= LocalPlayer and p.Character then
-                        table.insert(allChars, p.Character)
+                        if not (espIgnoreTeammates and isTeammate(p)) then
+                            table.insert(allChars, p.Character)
+                        end
                     end
                 end
                 if espBotDetect then
@@ -1266,8 +1330,14 @@ task.spawn(function()
                                     data.box.Visible = true
                                     data.box.Size = UDim2.new(0, width, 0, height)
                                     data.box.Position = UDim2.new(0, headScreen.X - width/2, 0, headScreen.Y)
-                                    local visible = isPlayerVisible(char)
-                                    local color = visible and espVisibleColor or espHiddenColor
+                                    -- YENİ: takım arkadaşıysa mavi, değilse visible/hidden rengi
+                                    local color
+                                    if isTeammateCharacter(char) then
+                                        color = espTeammateColor
+                                    else
+                                        local visible = isPlayerVisible(char)
+                                        color = visible and espVisibleColor or espHiddenColor
+                                    end
                                     data.stroke.Color = color
                                     data.nameLabel.Visible = espShowName
                                     if espShowName then
@@ -1302,6 +1372,7 @@ task.spawn(function()
                         end
                     end
                 end
+                -- orphan cleanup
                 for model, _ in pairs(espData) do
                     if not seen[model] then
                         removeESPForModel(model)
@@ -1373,4 +1444,4 @@ end)
 
 captureOriginal(LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait())
 
-print("STRXcahts v32-HBOT | hitbox bot support enabled")
+print("STRXcahts v33- |
