@@ -1,4 +1,4 @@
--- STRXcahts v28-REV | 3 minimal fix
+-- STRXcahts v28-FINAL | ESP + FOV + Aimbot fixed
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 local Players           = game:GetService("Players")
@@ -135,7 +135,7 @@ local function isPlayerVisible(targetChar)
     return r == nil
 end
 
--- ============ FLY (FIX: smooth lerp + horizontal only) ============
+-- ============ FLY ============
 local function destroyFlyPhysics()
     if flyConn then flyConn:Disconnect() flyConn = nil end
     if flyBV then flyBV:Destroy() flyBV = nil end
@@ -319,7 +319,9 @@ end
 
 local ScreenGui   = newScreenGui("STRXcahtsMenu", 50)
 local ESPGui      = newScreenGui("STRX_ESPGui", 6)
+ESPGui.IgnoreGuiInset = true          -- FIX: ESP kayması
 local FOVGui      = newScreenGui("STRX_FOVGui", 5)
+FOVGui.IgnoreGuiInset = true          -- FIX: FOV kayması
 local WatermarkGui= newScreenGui("STRX_Watermark", 100)
 
 local FOVFrame = Instance.new("Frame", FOVGui)
@@ -332,6 +334,7 @@ local FOVStroke = Instance.new("UIStroke", FOVFrame)
 FOVStroke.Color = Color3.fromRGB(0, 255, 100)
 FOVStroke.Thickness = 2
 
+-- Watermark
 local wmFrame = Instance.new("Frame", WatermarkGui)
 wmFrame.Size = UDim2.new(0, 180, 0, 25)
 wmFrame.Position = UDim2.new(1, -190, 0, 10)
@@ -1046,31 +1049,18 @@ task.spawn(function()
     end
 end)
 
-task.spawn(function()
-    while true do
-        task.wait(aimbotEnabled and 0.05 or 0.3)
-        if aimbotEnabled then
-            if not aimbotTarget or not aimbotTarget.Parent then
-                aimbotTarget = getAimbotTarget()
-            else
-                local hum = aimbotTarget.Parent:FindFirstChildOfClass("Humanoid")
-                if not hum or hum.Health <= 0 then aimbotTarget = getAimbotTarget() end
-            end
-        else
-            aimbotTarget = nil
-        end
-    end
-end)
+-- Eski aimbot target loop SİLİNDİ (RenderStep içinde her frame tazeleniyor)
 
--- ============ AIMBOT RENDERSTEP (FIX: offset preserve + FOV circle always when toggle) ============
+-- ============ AIMBOT RENDERSTEP (FINAL) ============
 local aimWasScriptable = false
 local aimCamOffset = Vector3.zero
 
 RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value + 1, function()
-    -- FIX: FOV circle her zaman görünür (aimbot açık olmasa da görebilirsin)
+    -- FOV çember
     if showFOVCircle then
         FOVFrame.Visible = true
-        FOVFrame.Position = UDim2.fromOffset(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        local vp = Camera.ViewportSize
+        FOVFrame.Position = UDim2.fromOffset(vp.X / 2, vp.Y / 2)
         FOVFrame.Size = UDim2.fromOffset(aimbotFOV * 2, aimbotFOV * 2)
     else
         FOVFrame.Visible = false
@@ -1081,13 +1071,23 @@ RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value
         if aimWasScriptable then
             aimWasScriptable = false
             pcall(function() Camera.CameraType = Enum.CameraType.Custom end)
+            if hum then hum.AutoRotate = true end
         end
         return
     end
 
-    local keyHeld = aimbotEnabled and isAimbotTriggered()
+    -- Her frame hedef tazele (takılma önleme)
+    if aimbotEnabled then
+        aimbotTarget = getAimbotTarget()
+    else
+        aimbotTarget = nil
+    end
 
-    if keyHeld then
+    local keyHeld = aimbotEnabled and isAimbotTriggered()
+    local hasTarget = aimbotTarget and aimbotTarget.Parent
+
+    -- Sadece tuş basılı VE hedef var ise kamera kilitle
+    if keyHeld and hasTarget then
         if not aimWasScriptable then
             aimWasScriptable = true
             aimCamOffset = Camera.CFrame.Position - hrp.Position
@@ -1097,21 +1097,17 @@ RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value
 
         local alpha = 1 / math.max(aimbotSmoothness, 1)
         local camPos = hrp.Position + aimCamOffset
+        local desiredCF = CFrame.lookAt(camPos, aimbotTarget.Position)
+        Camera.CFrame = Camera.CFrame:Lerp(desiredCF, alpha)
 
-        if aimbotTarget then
-            local desiredCF = CFrame.lookAt(camPos, aimbotTarget.Position)
-            Camera.CFrame = Camera.CFrame:Lerp(desiredCF, alpha)
-            local camLook = Camera.CFrame.LookVector
-            local flat = Vector3.new(camLook.X, 0, camLook.Z)
-            if flat.Magnitude > 0.01 then
-                local rotCF = CFrame.lookAt(hrp.Position, hrp.Position + flat.Unit)
-                hrp.CFrame = hrp.CFrame:Lerp(rotCF, math.min(1, alpha * 2))
-            end
-        else
-            local curRot = Camera.CFrame - Camera.CFrame.Position
-            Camera.CFrame = CFrame.new(camPos) * curRot
+        local toTarget = aimbotTarget.Position - hrp.Position
+        local flat = Vector3.new(toTarget.X, 0, toTarget.Z)
+        if flat.Magnitude > 0.05 then
+            local rotCF = CFrame.lookAt(hrp.Position, hrp.Position + flat.Unit)
+            hrp.CFrame = hrp.CFrame:Lerp(rotCF, math.min(1, alpha * 2))
         end
     else
+        -- Hedef yok veya tuş bırakıldı → Custom'a dön
         if aimWasScriptable then
             aimWasScriptable = false
             pcall(function() Camera.CameraType = Enum.CameraType.Custom end)
@@ -1122,4 +1118,4 @@ end)
 
 captureOriginal(LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait())
 
-print("STRXcahts v28-REV | 3 minimal fix (FOV / Fly / Aimbot)")
+print("STRXcahts v28-FINAL | ESP+FOV+Aimbot fixed")
