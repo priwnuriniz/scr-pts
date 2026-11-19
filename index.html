@@ -1,5 +1,4 @@
--- STRXcahts v27 | Fixed & Optimized
--- Re-run guard
+-- STRXcahts v28 | Fixed Aimbot Camera + FOV Circle
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 local Players           = game:GetService("Players")
@@ -321,7 +320,7 @@ local function newScreenGui(name, order)
     g.Name = name
     g.Parent = guiParent
     g.ResetOnSpawn = false
-    g.IgnoreGuiInset = false        -- düzeltme: viewport koordinatlarıyla uyum
+    g.IgnoreGuiInset = false
     g.DisplayOrder = order
     g.Enabled = true
     return g
@@ -1010,7 +1009,7 @@ task.spawn(function()
     end
 end)
 
--- ESP (~20 Hz açıkken, 2.5 Hz kapalıyken uyur)
+-- ESP (~20 Hz açıkken)
 task.spawn(function()
     while true do
         task.wait(espEnabled and 0.05 or 0.4)
@@ -1106,26 +1105,66 @@ task.spawn(function()
     end
 end)
 
--- Aimbot renderstep
+-- ============================================================
+-- YENİ AİMBOT RENDERSTEP (FIXED)
+-- Kamera karakteri takip eder (freecam yok), FOV çemberi viewport merkezinde
+-- ============================================================
+local aimWasScriptable = false
+local aimCamDistance   = 12
+
 RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value + 1, function()
+    -- FOV çemberini viewport merkezine tam hizala (hedef seçimiyle aynı referans)
     if aimbotEnabled and showFOVCircle then
         FOVFrame.Visible = true
-        FOVFrame.Size = UDim2.fromOffset(aimbotFOV*2, aimbotFOV*2)
+        FOVFrame.Position = UDim2.fromOffset(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        FOVFrame.Size = UDim2.fromOffset(aimbotFOV * 2, aimbotFOV * 2)
     else
         FOVFrame.Visible = false
     end
-    if not aimbotEnabled then return end
-    if isAimbotTriggered() and aimbotTarget then
-        if Camera.CameraType ~= Enum.CameraType.Scriptable then Camera.CameraType = Enum.CameraType.Scriptable end
-        local cf = CFrame.new(Camera.CFrame.Position, aimbotTarget.Position)
-        Camera.CFrame = Camera.CFrame:Lerp(cf, 1/math.max(aimbotSmoothness,1))
-    elseif Camera.CameraType == Enum.CameraType.Scriptable then
-        -- düzeltme: aimbot bırakılınca kamerayı sal
-        pcall(function() Camera.CameraType = Enum.CameraType.Custom end)
+
+    local char, hrp, hum = safeCharacter()
+    local keyHeld = aimbotEnabled and isAimbotTriggered()
+
+    if keyHeld and hrp then
+        local head = char:FindFirstChild("Head") or hrp
+
+        if not aimWasScriptable then
+            aimWasScriptable = true
+            local d = (Camera.CFrame.Position - head.Position).Magnitude
+            aimCamDistance = (d >= 0.1) and d or 12
+            Camera.CameraType = Enum.CameraType.Scriptable
+            if hum then hum.AutoRotate = false end
+        end
+
+        local alpha = 1 / math.max(aimbotSmoothness, 1)
+
+        if aimbotTarget then
+            local lookDir = (aimbotTarget.Position - head.Position).Unit
+            local camPos  = head.Position - lookDir * aimCamDistance
+            local desiredCF = CFrame.lookAt(camPos, aimbotTarget.Position)
+            Camera.CFrame = Camera.CFrame:Lerp(desiredCF, alpha)
+
+            local camLook = Camera.CFrame.LookVector
+            local flat = Vector3.new(camLook.X, 0, camLook.Z)
+            if flat.Magnitude > 0.01 then
+                local rotCF = CFrame.lookAt(hrp.Position, hrp.Position + flat.Unit)
+                hrp.CFrame = hrp.CFrame:Lerp(rotCF, math.min(1, alpha * 1.5))
+            end
+        else
+            local lookDir = Camera.CFrame.LookVector
+            local camPos  = head.Position - lookDir * aimCamDistance
+            Camera.CFrame = CFrame.lookAt(camPos, head.Position + lookDir)
+        end
+    else
+        if aimWasScriptable then
+            aimWasScriptable = false
+            pcall(function() Camera.CameraType = Enum.CameraType.Custom end)
+            if hum then hum.AutoRotate = true end
+        end
     end
 end)
 
 -- initial
 captureOriginal(LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait())
 
-print("STRXcahts v27 | Fixed & Optimized")
+print("STRXcahts v28 | Aimbot Camera Fixed + FOV Circle Centered")
