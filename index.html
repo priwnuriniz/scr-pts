@@ -16,24 +16,20 @@ local Camera            = workspace.CurrentCamera
 local connections = {}
 local function track(c) table.insert(connections, c); return c end
 
--- FIX 2: guvenli gui parent fallback (DUZELTILDI: PlayerGui once, CoreGui son care)
+-- FIX 2: guvenli gui parent fallback
 local function getGuiParent()
     local s, r = pcall(function() return gethui() end)
     if s and r then
         local ok = pcall(function() r:GetChildren() end)
         if ok then return r end
     end
-    local s3, r3 = pcall(function()
-        local pg = LocalPlayer:FindFirstChild("PlayerGui")
-        if pg then return pg end
-        return LocalPlayer:WaitForChild("PlayerGui", 10)
-    end)
-    if s3 and r3 then return r3 end
     local s2, r2 = pcall(function() return game:GetService("CoreGui") end)
     if s2 and r2 then
         local ok2 = pcall(function() r2:GetChildren() end)
         if ok2 then return r2 end
     end
+    local s3, r3 = pcall(function() return LocalPlayer:WaitForChild("PlayerGui", 10) end)
+    if s3 and r3 then return r3 end
     return game:GetService("CoreGui")
 end
 local guiParent = getGuiParent()
