@@ -1,4 +1,4 @@
--- STRXcahts v38-FULL | WalkSpeed + Hitbox + Bot Detection + Tüm UI
+-- STRXcahts v39-FULL | TAM KOD
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 local Players           = game:GetService("Players")
@@ -7,7 +7,6 @@ local UserInputService  = game:GetService("UserInputService")
 local TweenService      = game:GetService("TweenService")
 local GuiService        = game:GetService("GuiService")
 local VirtualUser       = game:GetService("VirtualUser")
-local Lighting          = game:GetService("Lighting")
 local LocalPlayer       = Players.LocalPlayer
 local Camera            = workspace.CurrentCamera
 
@@ -21,7 +20,6 @@ local function getGuiParent()
 end
 local guiParent = getGuiParent()
 
--- ============ STATE ============
 local flyEnabled, flySpeed = false, 50
 local walkSpeedEnabled, walkSpeedValue = false, 30
 local jumpPowerEnabled, jumpPowerValue = false, 50
@@ -75,13 +73,11 @@ local listeningForTpAuraKey = false
 local listeningForLookTpKey = false
 local tpAuraBotDetect = false
 
--- Ayarlar sekmesi state
 local antiKickEnabled = true
 local lowGraphicsEnabled = false
 local shadowsDisabled = false
 local blameBlockEnabled = false
 
--- ============ ANTI-KICK / BLAME ============
 local function setupAntiKick()
     if not antiKickEnabled then return end
     pcall(function()
@@ -109,7 +105,6 @@ local function setupBlameBlock()
 end
 setupBlameBlock()
 
--- ============ BOT/MONSTER CACHE (ONARILDI) ============
 local botCache = {}
 local botCacheTime = 0
 
@@ -117,14 +112,10 @@ local function isBotCharacter(model)
     if not model or not model:IsA("Model") then return false end
     if model == LocalPlayer.Character then return false end
     if Players:GetPlayerFromCharacter(model) then return false end
-    
     local hum = model:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return false end
-    
     for _, child in ipairs(model:GetChildren()) do
-        if child:IsA("BasePart") then
-            return true
-        end
+        if child:IsA("BasePart") then return true end
     end
     return false
 end
@@ -147,7 +138,6 @@ local function getDisplayName(char)
     return char.Name
 end
 
--- ============ HELPERS ============
 local function getRGBColor()
     rgbHue = (rgbHue + 0.005) % 1
     return Color3.fromHSV(rgbHue, 0.85, 1)
@@ -172,7 +162,6 @@ local function captureOriginal(char)
     }
 end
 
--- ============ WALKSPEED DÜZELTMESİ ============
 local function applyWalkSpeed()
     local _, _, hum = safeCharacter()
     if not hum then return end
@@ -232,7 +221,6 @@ local function isPlayerVisible(targetChar)
     return r == nil
 end
 
--- ============ FLY ============
 local function destroyFlyPhysics()
     if flyConn then flyConn:Disconnect() flyConn = nil end
     if flyBV then flyBV:Destroy() flyBV = nil end
@@ -289,7 +277,6 @@ local function stopFly()
     if toggleSync.fly then toggleSync.fly.setVisual(false) end
 end
 
--- ============ SPIN / NOCLIP ============
 local function toggleSpin(state)
     spinEnabled = state
     local _, hrp = safeCharacter()
@@ -323,7 +310,6 @@ local function toggleNoclip(state)
     end
 end
 
--- ============ TELEPORT ============
 local function teleportCharacterTo(cf)
     local char, hrp = safeCharacter()
     if not hrp then return false end
@@ -400,13 +386,10 @@ local function lookTp()
     end
 end
 
--- ============ HITBOX (ONARILDI: TÜM PARÇALAR) ============
 local function hitboxLoop()
     if hitboxLoopActive then return end
     hitboxLoopActive = true
-    
     local targetPartNames = {"Head", "Torso", "UpperTorso", "LowerTorso", "HumanoidRootPart"}
-    
     while hitboxEnabled do
         local targets = {}
         for _, p in ipairs(Players:GetPlayers()) do
@@ -420,7 +403,6 @@ local function hitboxLoop()
                 table.insert(targets, model)
             end
         end
-
         for _, char in ipairs(targets) do
             if char and char.Parent then
                 for _, partName in ipairs(targetPartNames) do
@@ -437,7 +419,6 @@ local function hitboxLoop()
         end
         task.wait(0.25)
     end
-    
     for part, size in pairs(originalSizes) do
         if part and part.Parent then pcall(function() part.Size = size end) end
     end
@@ -445,7 +426,6 @@ local function hitboxLoop()
     hitboxLoopActive = false
 end
 
--- ============ CLEANUP ============
 local function cleanup()
     for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
     connections = {}
@@ -463,7 +443,6 @@ local function cleanup()
 end
 _G.STRXcahts = {Cleanup = cleanup}
 
--- ============ GUIs ============
 local function newScreenGui(name, order)
     local g = Instance.new("ScreenGui")
     g.Name = name
@@ -509,7 +488,6 @@ wmText.TextColor3 = Color3.new(1,1,1)
 wmText.Font = Enum.Font.GothamBold
 wmText.TextSize = 12
 
--- ============ ESP ============
 local function createESPForModel(char)
     if espData[char] then
         for _, k in ipairs({"box","nameLabel","distLabel","hpBarBg"}) do
@@ -556,7 +534,6 @@ local function removeESPForModel(char)
     end
 end
 
--- ============ AIMBOT TARGET ============
 local aimRayParams = RaycastParams.new()
 aimRayParams.FilterType = Enum.RaycastFilterType.Exclude
 
@@ -565,7 +542,6 @@ local function getAimbotTarget()
     local center = Camera.ViewportSize / 2
     local myChar = LocalPlayer.Character
     if not myChar then return nil end
-
     local allChars = {}
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character then
@@ -578,18 +554,11 @@ local function getAimbotTarget()
             table.insert(allChars, model)
         end
     end
-
     for _, char in ipairs(allChars) do
         local hum = char:FindFirstChildOfClass("Humanoid")
         local alive = (hum == nil) or (hum.Health > 0)
         if alive then
-            local targetPart = char:FindFirstChild(aimbotAimPart) 
-                or char:FindFirstChild("HumanoidRootPart") 
-                or char:FindFirstChild("Head")
-                or char:FindFirstChild("UpperTorso")
-                or char:FindFirstChild("Torso")
-                or char:FindFirstChildWhichIsA("BasePart")
-                
+            local targetPart = char:FindFirstChild(aimbotAimPart) or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChildWhichIsA("BasePart")
             if targetPart then
                 local sp, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
                 if onScreen then
@@ -610,7 +579,6 @@ local function getAimbotTarget()
     return closest
 end
 
--- ============ UI BUILDERS ============
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 680, 0, 540)
 MainFrame.Position = UDim2.new(0.5, -340, 0.5, -270)
@@ -756,4 +724,24 @@ local function makeToggle(parent, text, y, callback, keybindId, syncId)
         callback(on)
     end
     onBtn.MouseButton1Click:Connect(doToggle)
-    if keybindId and keybinds[keybindId] then keybinds[keybindId].callback
+    if keybindId and keybinds[keybindId] then keybinds[keybindId].callback = doToggle end
+    if syncId then toggleSync[syncId] = {setVisual = setVisual, getState = function() return on end} end
+    return {setVisual = setVisual, getState = function() return on end, button = onBtn}
+end
+
+local function makeKeybindAction(parent, text, y)
+    local f = Instance.new("Frame", parent)
+    f.Size = UDim2.new(0,320,0,34)
+    f.Position = UDim2.new(0,8,0,y)
+    f.BackgroundColor3 = Color3.fromRGB(28,28,36)
+    f.ZIndex = 2
+    Instance.new("UICorner", f).CornerRadius = UDim.new(0,7)
+    local lbl = Instance.new("TextLabel", f)
+    lbl.Size = UDim2.new(1,-130,1,0)
+    lbl.Position = UDim2.new(0,12,0,0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = Color3.new(1,1,1)
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 13
+    lbl.TextXAlignment
