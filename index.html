@@ -1,4 +1,4 @@
--- STRXcahts v39-FULL | TAM KOD
+-- STRXcahts v40-PART1
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 local Players           = game:GetService("Players")
@@ -72,11 +72,7 @@ local lookTpKeybind = nil
 local listeningForTpAuraKey = false
 local listeningForLookTpKey = false
 local tpAuraBotDetect = false
-
 local antiKickEnabled = true
-local lowGraphicsEnabled = false
-local shadowsDisabled = false
-local blameBlockEnabled = false
 
 local function setupAntiKick()
     if not antiKickEnabled then return end
@@ -87,9 +83,7 @@ local function setupAntiKick()
         setreadonly(mt, false)
         mt.__namecall = newcclosure(function(self, ...)
             local method = getnamecallmethod()
-            if (method == "Kick" or method == "kick") and self == LocalPlayer then
-                return nil
-            end
+            if (method == "Kick" or method == "kick") and self == LocalPlayer then return nil end
             return oldNamecall(self, ...)
         end)
         setreadonly(mt, true)
@@ -97,20 +91,10 @@ local function setupAntiKick()
 end
 setupAntiKick()
 
-local function setupBlameBlock()
-    if not blameBlockEnabled then return end
-    pcall(function()
-        LocalPlayer.Blame = function() end
-    end)
-end
-setupBlameBlock()
-
 local botCache = {}
 local botCacheTime = 0
-
 local function isBotCharacter(model)
-    if not model or not model:IsA("Model") then return false end
-    if model == LocalPlayer.Character then return false end
+    if not model or not model:IsA("Model") or model == LocalPlayer.Character then return false end
     if Players:GetPlayerFromCharacter(model) then return false end
     local hum = model:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return false end
@@ -119,30 +103,24 @@ local function isBotCharacter(model)
     end
     return false
 end
-
 local function refreshBotCache()
     if tick() - botCacheTime < 0.5 then return end
     botCacheTime = tick()
     local newCache = {}
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("Model") and isBotCharacter(obj) then
-            table.insert(newCache, obj)
-        end
+        if obj:IsA("Model") and isBotCharacter(obj) then table.insert(newCache, obj) end
     end
     botCache = newCache
 end
-
 local function getDisplayName(char)
     local p = Players:GetPlayerFromCharacter(char)
     if p then return p.Name end
     return char.Name
 end
-
 local function getRGBColor()
     rgbHue = (rgbHue + 0.005) % 1
     return Color3.fromHSV(rgbHue, 0.85, 1)
 end
-
 local function safeCharacter()
     local char = LocalPlayer.Character
     if not char then return nil end
@@ -151,64 +129,42 @@ local function safeCharacter()
     if not hrp or not hum then return nil end
     return char, hrp, hum
 end
-
 local function captureOriginal(char)
     if not char or originalStats[char] then return end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
-    originalStats[char] = {
-        WalkSpeed = hum.WalkSpeed, JumpPower = hum.JumpPower,
-        UseJumpPower = hum.UseJumpPower, JumpHeight = hum.JumpHeight,
-    }
+    originalStats[char] = {WalkSpeed = hum.WalkSpeed, JumpPower = hum.JumpPower, UseJumpPower = hum.UseJumpPower, JumpHeight = hum.JumpHeight}
 end
-
 local function applyWalkSpeed()
     local _, _, hum = safeCharacter()
     if not hum then return end
     local orig = originalStats[LocalPlayer.Character]
     local targetSpeed = walkSpeedEnabled and walkSpeedValue or (orig and orig.WalkSpeed or 16)
-    if hum.WalkSpeed ~= targetSpeed then
-        hum.WalkSpeed = targetSpeed
-    end
+    if hum.WalkSpeed ~= targetSpeed then hum.WalkSpeed = targetSpeed end
 end
-
 task.spawn(function()
     while true do
         task.wait(0.1)
         if walkSpeedEnabled then
             local _, _, hum = safeCharacter()
-            if hum and hum.WalkSpeed ~= walkSpeedValue then
-                hum.WalkSpeed = walkSpeedValue
-            end
+            if hum and hum.WalkSpeed ~= walkSpeedValue then hum.WalkSpeed = walkSpeedValue end
         end
     end
 end)
-
 local function applyJumpPower()
     local _, _, hum = safeCharacter()
     if not hum then return end
     local orig = originalStats[LocalPlayer.Character]
-    if jumpPowerEnabled then
-        hum.UseJumpPower = true
-        hum.JumpPower = jumpPowerValue
-    elseif orig then
-        hum.UseJumpPower = orig.UseJumpPower
-        if orig.UseJumpPower then hum.JumpPower = orig.JumpPower
-        else hum.JumpHeight = orig.JumpHeight end
-    end
+    if jumpPowerEnabled then hum.UseJumpPower = true; hum.JumpPower = jumpPowerValue
+    elseif orig then hum.UseJumpPower = orig.UseJumpPower; if orig.UseJumpPower then hum.JumpPower = orig.JumpPower else hum.JumpHeight = orig.JumpHeight end end
 end
-
 local function isAimbotTriggered()
     if typeof(aimbotKey) == "EnumItem" then
-        if aimbotKey.EnumType == Enum.KeyCode then
-            return UserInputService:IsKeyDown(aimbotKey)
-        elseif aimbotKey.EnumType == Enum.UserInputType then
-            return UserInputService:IsMouseButtonPressed(aimbotKey)
-        end
+        if aimbotKey.EnumType == Enum.KeyCode then return UserInputService:IsKeyDown(aimbotKey)
+        elseif aimbotKey.EnumType == Enum.UserInputType then return UserInputService:IsMouseButtonPressed(aimbotKey) end
     end
     return false
 end
-
 local function isPlayerVisible(targetChar)
     local myChar = LocalPlayer.Character
     if not myChar then return false end
@@ -220,13 +176,12 @@ local function isPlayerVisible(targetChar)
     local r = workspace:Raycast(Camera.CFrame.Position, targetHead.Position - Camera.CFrame.Position, p)
     return r == nil
 end
-
+-- STRXcahts v40-PART2
 local function destroyFlyPhysics()
     if flyConn then flyConn:Disconnect() flyConn = nil end
     if flyBV then flyBV:Destroy() flyBV = nil end
     if flyBG then flyBG:Destroy() flyBG = nil end
 end
-
 local function startFly()
     local _, hrp, hum = safeCharacter()
     if not hrp or not hum then return end
@@ -241,9 +196,7 @@ local function startFly()
     flyBG = Instance.new("BodyGyro")
     flyBG.Name = "STRX_FlyBG"
     flyBG.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
-    flyBG.P = 3000
-    flyBG.D = 100
-    flyBG.Parent = hrp
+    flyBG.P = 3000; flyBG.D = 100; flyBG.Parent = hrp
     flyConn = RunService.RenderStepped:Connect(function(dt)
         if not flyEnabled then return end
         local _, r = safeCharacter()
@@ -261,14 +214,11 @@ local function startFly()
         if flyBG then
             local look = camCF.LookVector
             local flat = Vector3.new(look.X, 0, look.Z)
-            if flat.Magnitude > 0.01 then
-                flyBG.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit)
-            end
+            if flat.Magnitude > 0.01 then flyBG.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit) end
         end
     end)
     if toggleSync.fly then toggleSync.fly.setVisual(true) end
 end
-
 local function stopFly()
     flyEnabled = false
     destroyFlyPhysics()
@@ -276,7 +226,6 @@ local function stopFly()
     if hum then hum.PlatformStand = false end
     if toggleSync.fly then toggleSync.fly.setVisual(false) end
 end
-
 local function toggleSpin(state)
     spinEnabled = state
     local _, hrp = safeCharacter()
@@ -292,7 +241,6 @@ local function toggleSpin(state)
         spinAV.Parent = hrp
     end
 end
-
 local function toggleNoclip(state)
     noclipEnabled = state
     if noclipConn then noclipConn:Disconnect() noclipConn = nil end
@@ -309,14 +257,12 @@ local function toggleNoclip(state)
         end)
     end
 end
-
 local function teleportCharacterTo(cf)
     local char, hrp = safeCharacter()
     if not hrp then return false end
     pcall(function() char:PivotTo(cf) end)
     return true
 end
-
 local function teleportToMouse()
     local _, hrp = safeCharacter()
     if not hrp then return end
@@ -332,11 +278,9 @@ local function teleportToMouse()
         teleportCharacterTo(CFrame.new(hit.Position + Vector3.new(0, 3, 0)))
     end
 end
-
 local function goBack()
     if savedPosition then teleportCharacterTo(savedPosition); savedPosition = nil end
 end
-
 local function randomPlayerTp()
     local _, myHrp = safeCharacter()
     if not myHrp then return end
@@ -345,9 +289,7 @@ local function randomPlayerTp()
         if p ~= LocalPlayer and p.Character then
             local hrp = p.Character:FindFirstChild("HumanoidRootPart")
             local hum = p.Character:FindFirstChildOfClass("Humanoid")
-            if hrp and hum and hum.Health > 0 then
-                table.insert(candidates, hrp)
-            end
+            if hrp and hum and hum.Health > 0 then table.insert(candidates, hrp) end
         end
     end
     if tpAuraBotDetect then
@@ -356,9 +298,7 @@ local function randomPlayerTp()
             local hrp = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart")
             if hrp then
                 local hum = model:FindFirstChildOfClass("Humanoid")
-                if not hum or hum.Health > 0 then
-                    table.insert(candidates, hrp)
-                end
+                if not hum or hum.Health > 0 then table.insert(candidates, hrp) end
             end
         end
     end
@@ -370,7 +310,6 @@ local function randomPlayerTp()
     local offset = Vector3.new(math.cos(angle) * dist, 0, math.sin(angle) * dist)
     teleportCharacterTo(CFrame.new(targetHrp.Position + offset + Vector3.new(0, 3, 0)))
 end
-
 local function lookTp()
     local _, hrp = safeCharacter()
     if not hrp then return end
@@ -385,7 +324,6 @@ local function lookTp()
         teleportCharacterTo(CFrame.new(hit.Position + Vector3.new(0, 3, 0)))
     end
 end
-
 local function hitboxLoop()
     if hitboxLoopActive then return end
     hitboxLoopActive = true
@@ -393,15 +331,11 @@ local function hitboxLoop()
     while hitboxEnabled do
         local targets = {}
         for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer and p.Character then
-                table.insert(targets, p.Character)
-            end
+            if p ~= LocalPlayer and p.Character then table.insert(targets, p.Character) end
         end
         if hitboxBotDetect then
             refreshBotCache()
-            for _, model in ipairs(botCache) do
-                table.insert(targets, model)
-            end
+            for _, model in ipairs(botCache) do table.insert(targets, model) end
         end
         for _, char in ipairs(targets) do
             if char and char.Parent then
@@ -425,7 +359,6 @@ local function hitboxLoop()
     originalSizes = {}
     hitboxLoopActive = false
 end
-
 local function cleanup()
     for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
     connections = {}
@@ -442,23 +375,16 @@ local function cleanup()
     _G.STRXcahts = nil
 end
 _G.STRXcahts = {Cleanup = cleanup}
-
+-- STRXcahts v40-PART3
 local function newScreenGui(name, order)
     local g = Instance.new("ScreenGui")
-    g.Name = name
-    g.Parent = guiParent
-    g.ResetOnSpawn = false
-    g.IgnoreGuiInset = false
-    g.DisplayOrder = order
-    g.Enabled = true
+    g.Name = name; g.Parent = guiParent; g.ResetOnSpawn = false; g.IgnoreGuiInset = false; g.DisplayOrder = order; g.Enabled = true
     return g
 end
 
 local ScreenGui   = newScreenGui("STRXcahtsMenu", 50)
-local ESPGui      = newScreenGui("STRX_ESPGui", 6)
-ESPGui.IgnoreGuiInset = true
-local FOVGui      = newScreenGui("STRX_FOVGui", 5)
-FOVGui.IgnoreGuiInset = true
+local ESPGui      = newScreenGui("STRX_ESPGui", 6); ESPGui.IgnoreGuiInset = true
+local FOVGui      = newScreenGui("STRX_FOVGui", 5); FOVGui.IgnoreGuiInset = true
 local WatermarkGui= newScreenGui("STRX_Watermark", 100)
 
 local FOVFrame = Instance.new("Frame", FOVGui)
@@ -468,8 +394,7 @@ FOVFrame.BackgroundTransparency = 1
 FOVFrame.Visible = false
 Instance.new("UICorner", FOVFrame).CornerRadius = UDim.new(1, 0)
 local FOVStroke = Instance.new("UIStroke", FOVFrame)
-FOVStroke.Color = Color3.fromRGB(0, 255, 100)
-FOVStroke.Thickness = 2
+FOVStroke.Color = Color3.fromRGB(0, 255, 100); FOVStroke.Thickness = 2
 
 local wmFrame = Instance.new("Frame", WatermarkGui)
 wmFrame.Size = UDim2.new(0, 180, 0, 25)
@@ -478,15 +403,11 @@ wmFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
 wmFrame.BackgroundTransparency = 0.3
 Instance.new("UICorner", wmFrame).CornerRadius = UDim.new(0, 4)
 local wmStroke = Instance.new("UIStroke", wmFrame)
-wmStroke.Color = Color3.fromRGB(255, 140, 0)
-wmStroke.Thickness = 1
+wmStroke.Color = Color3.fromRGB(255, 140, 0); wmStroke.Thickness = 1
 local wmText = Instance.new("TextLabel", wmFrame)
-wmText.Size = UDim2.new(1, 0, 1, 0)
-wmText.BackgroundTransparency = 1
-wmText.Text = "STRXCHATS | 60 FPS"
-wmText.TextColor3 = Color3.new(1,1,1)
-wmText.Font = Enum.Font.GothamBold
-wmText.TextSize = 12
+wmText.Size = UDim2.new(1, 0, 1, 0); wmText.BackgroundTransparency = 1
+wmText.Text = "STRXCHATS | 60 FPS"; wmText.TextColor3 = Color3.new(1,1,1)
+wmText.Font = Enum.Font.GothamBold; wmText.TextSize = 12
 
 local function createESPForModel(char)
     if espData[char] then
@@ -494,34 +415,20 @@ local function createESPForModel(char)
             if espData[char][k] then espData[char][k]:Destroy() end
         end
     end
-    local box = Instance.new("Frame", ESPGui)
-    box.BackgroundTransparency = 1
-    box.Visible = false
-    local boxStroke = Instance.new("UIStroke", box)
-    boxStroke.Thickness = 1.5
+    local box = Instance.new("Frame", ESPGui); box.BackgroundTransparency = 1; box.Visible = false
+    local boxStroke = Instance.new("UIStroke", box); boxStroke.Thickness = 1.5
     local hpBarBg = Instance.new("Frame", box)
-    hpBarBg.Size = UDim2.new(0, 3, 1, 0)
-    hpBarBg.Position = UDim2.new(0, -6, 0, 0)
-    hpBarBg.BackgroundColor3 = Color3.fromRGB(20,20,20)
-    hpBarBg.Visible = false
+    hpBarBg.Size = UDim2.new(0, 3, 1, 0); hpBarBg.Position = UDim2.new(0, -6, 0, 0)
+    hpBarBg.BackgroundColor3 = Color3.fromRGB(20,20,20); hpBarBg.Visible = false
     local hpFill = Instance.new("Frame", hpBarBg)
-    hpFill.Size = UDim2.new(1,0,1,0)
-    hpFill.AnchorPoint = Vector2.new(0,1)
-    hpFill.Position = UDim2.new(0,0,1,0)
+    hpFill.Size = UDim2.new(1,0,1,0); hpFill.AnchorPoint = Vector2.new(0,1); hpFill.Position = UDim2.new(0,0,1,0)
     local nameLbl = Instance.new("TextLabel", ESPGui)
-    nameLbl.BackgroundTransparency = 1
-    nameLbl.Text = getDisplayName(char)
-    nameLbl.TextColor3 = Color3.new(1,1,1)
-    nameLbl.Font = Enum.Font.GothamBold
-    nameLbl.TextSize = 14
-    nameLbl.TextStrokeTransparency = 0
-    nameLbl.Visible = false
+    nameLbl.BackgroundTransparency = 1; nameLbl.Text = getDisplayName(char)
+    nameLbl.TextColor3 = Color3.new(1,1,1); nameLbl.Font = Enum.Font.GothamBold
+    nameLbl.TextSize = 14; nameLbl.TextStrokeTransparency = 0; nameLbl.Visible = false
     local distLbl = Instance.new("TextLabel", ESPGui)
-    distLbl.BackgroundTransparency = 1
-    distLbl.Font = Enum.Font.Gotham
-    distLbl.TextSize = 12
-    distLbl.TextStrokeTransparency = 0
-    distLbl.Visible = false
+    distLbl.BackgroundTransparency = 1; distLbl.Font = Enum.Font.Gotham
+    distLbl.TextSize = 12; distLbl.TextStrokeTransparency = 0; distLbl.Visible = false
     espData[char] = {box=box, stroke=boxStroke, nameLabel=nameLbl, distLabel=distLbl, hpBarBg=hpBarBg, hpFill=hpFill}
 end
 
@@ -544,15 +451,11 @@ local function getAimbotTarget()
     if not myChar then return nil end
     local allChars = {}
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character then
-            table.insert(allChars, p.Character)
-        end
+        if p ~= LocalPlayer and p.Character then table.insert(allChars, p.Character) end
     end
     if aimbotBotDetect then
         refreshBotCache()
-        for _, model in ipairs(botCache) do
-            table.insert(allChars, model)
-        end
+        for _, model in ipairs(botCache) do table.insert(allChars, model) end
     end
     for _, char in ipairs(allChars) do
         local hum = char:FindFirstChildOfClass("Humanoid")
@@ -580,168 +483,80 @@ local function getAimbotTarget()
 end
 
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 680, 0, 540)
-MainFrame.Position = UDim2.new(0.5, -340, 0.5, -270)
-MainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-MainFrame.Active = true
-MainFrame.Draggable = true
-MainFrame.ClipsDescendants = true
+MainFrame.Size = UDim2.new(0, 680, 0, 540); MainFrame.Position = UDim2.new(0.5, -340, 0.5, -270)
+MainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22); MainFrame.Active = true; MainFrame.Draggable = true; MainFrame.ClipsDescendants = true
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 14)
 local mainStroke = Instance.new("UIStroke", MainFrame)
-mainStroke.Color = Color3.fromRGB(255, 140, 0)
-mainStroke.Thickness = 1.5
+mainStroke.Color = Color3.fromRGB(255, 140, 0); mainStroke.Thickness = 1.5
 
 local bgImage = Instance.new("ImageLabel", MainFrame)
-bgImage.Size = UDim2.new(1,0,1,0)
-bgImage.BackgroundTransparency = 1
-bgImage.Image = "rbxassetid://10149736922"
-bgImage.ImageTransparency = 0.85
-bgImage.ScaleType = Enum.ScaleType.Crop
-bgImage.ZIndex = 0
+bgImage.Size = UDim2.new(1,0,1,0); bgImage.BackgroundTransparency = 1
+bgImage.Image = "rbxassetid://10149736922"; bgImage.ImageTransparency = 0.85; bgImage.ScaleType = Enum.ScaleType.Crop; bgImage.ZIndex = 0
 Instance.new("UICorner", bgImage).CornerRadius = UDim.new(0, 14)
 
 local bgLogo = Instance.new("TextLabel", MainFrame)
-bgLogo.Size = UDim2.new(1,0,1,0)
-bgLogo.BackgroundTransparency = 1
-bgLogo.Text = "STRXCHATS"
-bgLogo.TextColor3 = Color3.new(1,1,1)
-bgLogo.TextTransparency = 0.85
-bgLogo.Font = Enum.Font.GothamBlack
-bgLogo.TextSize = 120
-bgLogo.ZIndex = 1
+bgLogo.Size = UDim2.new(1,0,1,0); bgLogo.BackgroundTransparency = 1; bgLogo.Text = "STRXCHATS"
+bgLogo.TextColor3 = Color3.new(1,1,1); bgLogo.TextTransparency = 0.85; bgLogo.Font = Enum.Font.GothamBlack; bgLogo.TextSize = 120; bgLogo.ZIndex = 1
 
 local Title = Instance.new("TextLabel", MainFrame)
-Title.Size = UDim2.new(1,0,0,50)
-Title.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
-Title.Text = "  STRXCHATS  |  Insert = Ac/Kapat"
-Title.TextColor3 = Color3.new(1,1,1)
-Title.Font = Enum.Font.GothamBlack
-Title.TextSize = 18
-Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.ZIndex = 2
+Title.Size = UDim2.new(1,0,0,50); Title.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
+Title.Text = "  STRXCHATS  |  Insert = Ac/Kapat"; Title.TextColor3 = Color3.new(1,1,1)
+Title.Font = Enum.Font.GothamBlack; Title.TextSize = 18; Title.TextXAlignment = Enum.TextXAlignment.Left; Title.ZIndex = 2
 Instance.new("UICorner", Title).CornerRadius = UDim.new(0, 14)
-local titleGlow = Instance.new("UIStroke", Title)
-titleGlow.Color = Color3.new(1,1,1)
-titleGlow.Thickness = 2
-titleGlow.Transparency = 0.2
+local titleGlow = Instance.new("UIStroke", Title); titleGlow.Color = Color3.new(1,1,1); titleGlow.Thickness = 2; titleGlow.Transparency = 0.2
 
 local fpsLbl = Instance.new("TextLabel", Title)
-fpsLbl.Size = UDim2.new(0,100,1,0)
-fpsLbl.Position = UDim2.new(1,-110,0,0)
-fpsLbl.BackgroundTransparency = 1
-fpsLbl.Text = "60 FPS"
-fpsLbl.TextColor3 = Color3.new(1,1,1)
-fpsLbl.Font = Enum.Font.GothamBold
-fpsLbl.TextSize = 12
-fpsLbl.TextXAlignment = Enum.TextXAlignment.Right
-fpsLbl.ZIndex = 3
+fpsLbl.Size = UDim2.new(0,100,1,0); fpsLbl.Position = UDim2.new(1,-110,0,0); fpsLbl.BackgroundTransparency = 1
+fpsLbl.Text = "60 FPS"; fpsLbl.TextColor3 = Color3.new(1,1,1); fpsLbl.Font = Enum.Font.GothamBold; fpsLbl.TextSize = 12; fpsLbl.TextXAlignment = Enum.TextXAlignment.Right; fpsLbl.ZIndex = 3
 
 local tabNames = {"Player","ESP","Aimbot","TP","Ekstra","Ayarlar"}
 local tabs = {}
 local tabHolder = Instance.new("Frame", MainFrame)
-tabHolder.Size = UDim2.new(1,-30,0,34)
-tabHolder.Position = UDim2.new(0,15,0,60)
-tabHolder.BackgroundTransparency = 1
-tabHolder.ZIndex = 2
-local tabLay = Instance.new("UIListLayout", tabHolder)
-tabLay.FillDirection = Enum.FillDirection.Horizontal
-tabLay.Padding = UDim.new(0,5)
+tabHolder.Size = UDim2.new(1,-30,0,34); tabHolder.Position = UDim2.new(0,15,0,60); tabHolder.BackgroundTransparency = 1; tabHolder.ZIndex = 2
+local tabLay = Instance.new("UIListLayout", tabHolder); tabLay.FillDirection = Enum.FillDirection.Horizontal; tabLay.Padding = UDim.new(0,5)
 
 for _, name in ipairs(tabNames) do
     local btn = Instance.new("TextButton", tabHolder)
-    btn.Size = UDim2.new(0,80,1,0)
-    btn.BackgroundColor3 = Color3.fromRGB(38,38,45)
-    btn.Text = name
-    btn.TextColor3 = Color3.new(1,1,1)
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 11
-    btn.AutoButtonColor = false
-    btn.ZIndex = 2
+    btn.Size = UDim2.new(0,80,1,0); btn.BackgroundColor3 = Color3.fromRGB(38,38,45); btn.Text = name
+    btn.TextColor3 = Color3.new(1,1,1); btn.Font = Enum.Font.GothamBold; btn.TextSize = 11; btn.AutoButtonColor = false; btn.ZIndex = 2
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0,8)
     tabs[name] = btn
 end
 
 local content = Instance.new("Frame", MainFrame)
-content.Size = UDim2.new(1,-30,1,-145)
-content.Position = UDim2.new(0,15,0,102)
-content.BackgroundColor3 = Color3.fromRGB(14,14,18)
-content.BackgroundTransparency = 0.25
-content.ZIndex = 2
+content.Size = UDim2.new(1,-30,1,-145); content.Position = UDim2.new(0,15,0,102)
+content.BackgroundColor3 = Color3.fromRGB(14,14,18); content.BackgroundTransparency = 0.25; content.ZIndex = 2
 Instance.new("UICorner", content).CornerRadius = UDim.new(0,10)
 
 local function makeToggle(parent, text, y, callback, keybindId, syncId)
     local f = Instance.new("Frame", parent)
-    f.Size = UDim2.new(0,320,0,34)
-    f.Position = UDim2.new(0,8,0,y)
-    f.BackgroundColor3 = Color3.fromRGB(28,28,36)
-    f.ZIndex = 2
+    f.Size = UDim2.new(0,320,0,34); f.Position = UDim2.new(0,8,0,y); f.BackgroundColor3 = Color3.fromRGB(28,28,36); f.ZIndex = 2
     Instance.new("UICorner", f).CornerRadius = UDim.new(0,7)
     local lbl = Instance.new("TextLabel", f)
-    lbl.Size = UDim2.new(1,-130,1,0)
-    lbl.Position = UDim2.new(0,12,0,0)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = text
-    lbl.TextColor3 = Color3.new(1,1,1)
-    lbl.Font = Enum.Font.Gotham
-    lbl.TextSize = 13
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.ZIndex = 2
+    lbl.Size = UDim2.new(1,-130,1,0); lbl.Position = UDim2.new(0,12,0,0); lbl.BackgroundTransparency = 1; lbl.Text = text
+    lbl.TextColor3 = Color3.new(1,1,1); lbl.Font = Enum.Font.Gotham; lbl.TextSize = 13; lbl.TextXAlignment = Enum.TextXAlignment.Left; lbl.ZIndex = 2
     local kbBtn = nil
     if keybindId and keybinds[keybindId] then
         kbBtn = Instance.new("TextButton", f)
-        kbBtn.Size = UDim2.new(0,54,0,22)
-        kbBtn.Position = UDim2.new(1,-118,0.5,-11)
-        kbBtn.BackgroundColor3 = Color3.fromRGB(45,45,55)
-        kbBtn.Text = keybinds[keybindId].key and keybinds[keybindId].key.Name or "Yok"
-        kbBtn.TextColor3 = Color3.new(1,1,1)
-        kbBtn.Font = Enum.Font.GothamBold
-        kbBtn.TextSize = 10
-        kbBtn.ZIndex = 2
+        kbBtn.Size = UDim2.new(0,54,0,22); kbBtn.Position = UDim2.new(1,-118,0.5,-11); kbBtn.BackgroundColor3 = Color3.fromRGB(45,45,55)
+        kbBtn.Text = keybinds[keybindId].key and keybinds[keybindId].key.Name or "Yok"; kbBtn.TextColor3 = Color3.new(1,1,1)
+        kbBtn.Font = Enum.Font.GothamBold; kbBtn.TextSize = 10; kbBtn.ZIndex = 2
         Instance.new("UICorner", kbBtn).CornerRadius = UDim.new(0,5)
         kbBtn.MouseButton1Click:Connect(function() listeningForBind = keybindId; kbBtn.Text = "..." end)
         keybindButtons[keybindId] = kbBtn
     end
     local onBtn = Instance.new("TextButton", f)
-    onBtn.Size = UDim2.new(0,44,0,22)
-    onBtn.Position = UDim2.new(1,-54,0.5,-11)
-    onBtn.BackgroundColor3 = Color3.fromRGB(255,140,0)
-    onBtn.Text = "OFF"
-    onBtn.TextColor3 = Color3.new(1,1,1)
-    onBtn.Font = Enum.Font.GothamBold
-    onBtn.TextSize = 11
-    onBtn.ZIndex = 2
+    onBtn.Size = UDim2.new(0,44,0,22); onBtn.Position = UDim2.new(1,-54,0.5,-11); onBtn.BackgroundColor3 = Color3.fromRGB(255,140,0)
+    onBtn.Text = "OFF"; onBtn.TextColor3 = Color3.new(1,1,1); onBtn.Font = Enum.Font.GothamBold; onBtn.TextSize = 11; onBtn.ZIndex = 2
     Instance.new("UICorner", onBtn).CornerRadius = UDim.new(0,5)
     local on = false
     local function setVisual(v)
-        on = v
-        onBtn.Text = v and "ON" or "OFF"
-        TweenService:Create(onBtn, TweenInfo.new(0.2), {
-            BackgroundColor3 = v and Color3.fromRGB(0,180,90) or Color3.fromRGB(255,140,0)
-        }):Play()
+        on = v; onBtn.Text = v and "ON" or "OFF"
+        TweenService:Create(onBtn, TweenInfo.new(0.2), {BackgroundColor3 = v and Color3.fromRGB(0,180,90) or Color3.fromRGB(255,140,0)}):Play()
     end
-    local function doToggle()
-        setVisual(not on)
-        callback(on)
-    end
+    local function doToggle() setVisual(not on); callback(on) end
     onBtn.MouseButton1Click:Connect(doToggle)
     if keybindId and keybinds[keybindId] then keybinds[keybindId].callback = doToggle end
     if syncId then toggleSync[syncId] = {setVisual = setVisual, getState = function() return on end} end
     return {setVisual = setVisual, getState = function() return on end, button = onBtn}
 end
-
-local function makeKeybindAction(parent, text, y)
-    local f = Instance.new("Frame", parent)
-    f.Size = UDim2.new(0,320,0,34)
-    f.Position = UDim2.new(0,8,0,y)
-    f.BackgroundColor3 = Color3.fromRGB(28,28,36)
-    f.ZIndex = 2
-    Instance.new("UICorner", f).CornerRadius = UDim.new(0,7)
-    local lbl = Instance.new("TextLabel", f)
-    lbl.Size = UDim2.new(1,-130,1,0)
-    lbl.Position = UDim2.new(0,12,0,0)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = text
-    lbl.TextColor3 = Color3.new(1,1,1)
-    lbl.Font = Enum.Font.Gotham
-    lbl.TextSize = 13
-    lbl.TextXAlignment
