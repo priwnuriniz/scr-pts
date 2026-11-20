@@ -1,4 +1,4 @@
--- STRXcahts v33-BOTFIX | deep bot detection
+-- STRXcahts v34 | fly+ws+esp fixes
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 local Players           = game:GetService("Players")
@@ -76,7 +76,7 @@ local listeningForTpAuraKey = false
 local listeningForLookTpKey = false
 local tpAuraBotDetect = false
 
--- ============ BOT/MONSTER CACHE (GELISMIS) ============
+-- ============ BOT/MONSTER CACHE ============
 local botCache = {}
 local botCacheTime = 0
 
@@ -112,17 +112,12 @@ local function isBotCharacter(model)
         or model:FindFirstChild("LowerTorso")
     local anyPart = model:FindFirstChildWhichIsA("BasePart")
 
-    -- Klasik R6/R15
     if hrp then return true end
     if head and torso then return true end
-    -- Humanoid + herhangi bir parça (custom rig)
     if hum and anyPart then return true end
     if hum and (head or torso or hrp) then return true end
-    -- Head + başka gövde parçası
     if head and anyPart and anyPart.Name ~= "Head" then return true end
-    -- Health attribute
     if hasHealthAttribute(model) and anyPart then return true end
-    -- İsim anahtar kelimesi + parça
     local nameLower = model.Name:lower()
     for _, kw in ipairs(BOT_NAME_KEYWORDS) do
         if nameLower:find(kw, 1, true) and anyPart then return true end
@@ -195,6 +190,15 @@ local function applyWalkSpeed()
     hum.WalkSpeed = walkSpeedEnabled and walkSpeedValue or (orig and orig.WalkSpeed or 16)
 end
 
+-- FIX: WalkSpeed enforcer - oyun sifirlasa bile geri yazar
+track(RunService.Stepped:Connect(function()
+    if not walkSpeedEnabled then return end
+    local _, _, hum = safeCharacter()
+    if hum and math.abs(hum.WalkSpeed - walkSpeedValue) > 0.5 then
+        pcall(function() hum.WalkSpeed = walkSpeedValue end)
+    end
+end))
+
 local function applyJumpPower()
     local _, _, hum = safeCharacter()
     if not hum then return end
@@ -209,6 +213,18 @@ local function applyJumpPower()
     end
 end
 
+-- FIX: JumpPower enforcer
+track(RunService.Stepped:Connect(function()
+    if not jumpPowerEnabled then return end
+    local _, _, hum = safeCharacter()
+    if hum then
+        if not hum.UseJumpPower then pcall(function() hum.UseJumpPower = true end) end
+        if math.abs(hum.JumpPower - jumpPowerValue) > 0.5 then
+            pcall(function() hum.JumpPower = jumpPowerValue end)
+        end
+    end
+end))
+
 local function isAimbotTriggered()
     if typeof(aimbotKey) == "EnumItem" then
         if aimbotKey.EnumType == Enum.KeyCode then
@@ -220,19 +236,40 @@ local function isAimbotTriggered()
     return false
 end
 
+-- FIX: isPlayerVisible - kameradan degil oyuncu HRP'sinden raycast + cache
+local visibilityCache = setmetatable({}, {__mode = "k"})
+
 local function isPlayerVisible(targetChar)
+    local now = tick()
+    local cached = visibilityCache[targetChar]
+    if cached and now - cached.time < 0.06 then
+        return cached.visible
+    end
     local myChar = LocalPlayer.Character
     if not myChar then return false end
-    local targetHead = targetChar:FindFirstChild("Head") or targetChar:FindFirstChild("HumanoidRootPart")
-    if not targetHead then return false end
+    local myHrp = myChar:FindFirstChild("HumanoidRootPart")
+    if not myHrp then return false end
+    local targetHrp = targetChar:FindFirstChild("HumanoidRootPart")
+        or targetChar:FindFirstChild("Head")
+        or targetChar:FindFirstChildWhichIsA("BasePart")
+    if not targetHrp then return false end
+
+    local origin = myHrp.Position + Vector3.new(0, 1.5, 0)
+    local targetPos = targetHrp.Position + Vector3.new(0, 1, 0)
+    local dir = targetPos - origin
+
     local p = RaycastParams.new()
     p.FilterType = Enum.RaycastFilterType.Exclude
-    p.FilterDescendantsInstances = {targetChar, myChar}
-    local r = workspace:Raycast(Camera.CFrame.Position, targetHead.Position - Camera.CFrame.Position, p)
-    return r == nil
+    p.FilterDescendantsInstances = {myChar, targetChar}
+    p.IgnoreWater = true
+
+    local r = workspace:Raycast(origin, dir, p)
+    local visible = (r == nil)
+    visibilityCache[targetChar] = {time = now, visible = visible}
+    return visible
 end
 
--- ============ FLY ============
+-- ============ FLY (FIX: hybrid bodyvelocity + cframe fallback) ============
 local function destroyFlyPhysics()
     if flyConn then flyConn:Disconnect() flyConn = nil end
     if flyBV then flyBV:Destroy() flyBV = nil end
@@ -244,22 +281,34 @@ local function startFly()
     if not hrp or not hum then return end
     flyEnabled = true
     destroyFlyPhysics()
-    hum.PlatformStand = true
+
+    pcall(function()
+        hum.PlatformStand = true
+        hum.AutoRotate = false
+    end)
+
     flyBV = Instance.new("BodyVelocity")
     flyBV.Name = "STRX_FlyBV"
-    flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+    flyBV.MaxForce = Vector3.new(1e6, 1e6, 1e6)
     flyBV.Velocity = Vector3.zero
     flyBV.Parent = hrp
+
     flyBG = Instance.new("BodyGyro")
     flyBG.Name = "STRX_FlyBG"
-    flyBG.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
-    flyBG.P = 3000
-    flyBG.D = 100
+    flyBG.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
+    flyBG.P = 10000
+    flyBG.D = 500
     flyBG.Parent = hrp
+
+    local lastPos = hrp.Position
+    local cframeMode = false
+    local stuckFrames = 0
+
     flyConn = RunService.RenderStepped:Connect(function(dt)
         if not flyEnabled then return end
         local _, r = safeCharacter()
-        if not r or not flyBV or not flyBV.Parent then return end
+        if not r then return end
+
         local camCF = Camera.CFrame
         local dir = Vector3.zero
         if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += camCF.LookVector end
@@ -268,15 +317,58 @@ local function startFly()
         if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += camCF.RightVector end
         if UserInputService:IsKeyDown(Enum.KeyCode.E) then dir += Vector3.yAxis end
         if UserInputService:IsKeyDown(Enum.KeyCode.Q) then dir -= Vector3.yAxis end
-        local target = dir.Magnitude > 0 and (dir.Unit * flySpeed) or Vector3.zero
-        flyBV.Velocity = flyBV.Velocity:Lerp(target, math.min(1, dt * 10))
-        if flyBG then
+
+        local targetVel = dir.Magnitude > 0 and (dir.Unit * flySpeed) or Vector3.zero
+
+        if not cframeMode then
+            if not flyBV or not flyBV.Parent then
+                flyBV = Instance.new("BodyVelocity")
+                flyBV.Name = "STRX_FlyBV"
+                flyBV.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+                flyBV.Velocity = Vector3.zero
+                flyBV.Parent = r
+            end
+            if not flyBG or not flyBG.Parent then
+                flyBG = Instance.new("BodyGyro")
+                flyBG.Name = "STRX_FlyBG"
+                flyBG.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
+                flyBG.P = 10000
+                flyBG.D = 500
+                flyBG.Parent = r
+            end
+
+            flyBV.Velocity = flyBV.Velocity:Lerp(targetVel, math.min(1, dt * 10))
+            if flyBG then
+                local look = camCF.LookVector
+                local flat = Vector3.new(look.X, 0, look.Z)
+                if flat.Magnitude > 0.01 then
+                    flyBG.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit)
+                end
+            end
+
+            if targetVel.Magnitude > 0 then
+                if (r.Position - lastPos).Magnitude < 0.02 then
+                    stuckFrames = stuckFrames + 1
+                    if stuckFrames > 8 then
+                        cframeMode = true
+                        if flyBV then flyBV:Destroy() flyBV = nil end
+                        if flyBG then flyBG:Destroy() flyBG = nil end
+                    end
+                else
+                    stuckFrames = 0
+                end
+            end
+        else
+            pcall(function() r.AssemblyLinearVelocity = targetVel end)
+            r.CFrame = r.CFrame + targetVel * dt
             local look = camCF.LookVector
             local flat = Vector3.new(look.X, 0, look.Z)
             if flat.Magnitude > 0.01 then
-                flyBG.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit)
+                r.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit)
             end
         end
+
+        lastPos = r.Position
     end)
     if toggleSync.fly then toggleSync.fly.setVisual(true) end
 end
@@ -285,7 +377,12 @@ local function stopFly()
     flyEnabled = false
     destroyFlyPhysics()
     local _, _, hum = safeCharacter()
-    if hum then hum.PlatformStand = false end
+    if hum then
+        pcall(function()
+            hum.PlatformStand = false
+            hum.AutoRotate = true
+        end)
+    end
     if toggleSync.fly then toggleSync.fly.setVisual(false) end
 end
 
@@ -400,7 +497,7 @@ local function lookTp()
     end
 end
 
--- ============ HITBOX (BOT DESTEKLI) ============
+-- ============ HITBOX ============
 local function hitboxLoop()
     if hitboxLoopActive then return end
     hitboxLoopActive = true
@@ -414,7 +511,7 @@ local function hitboxLoop()
         if hitboxBotDetect then
             refreshBotCache()
             for _, model in ipairs(botCache) do
-                table.insert(targets, model)
+                if model and model.Parent then table.insert(targets, model) end
             end
         end
         for _, char in ipairs(targets) do
@@ -503,7 +600,15 @@ wmText.TextColor3 = Color3.new(1,1,1)
 wmText.Font = Enum.Font.GothamBold
 wmText.TextSize = 12
 
--- ============ ESP ============
+-- ============ ESP (FIX: died + ancestry connections) ============
+local function hideESPData(data)
+    if not data then return end
+    if data.box then data.box.Visible = false end
+    if data.nameLabel then data.nameLabel.Visible = false end
+    if data.distLabel then data.distLabel.Visible = false end
+    if data.hpBarBg then data.hpBarBg.Visible = false end
+end
+
 local function createESPForModel(char)
     if espData[char] then
         for _, k in ipairs({"box","nameLabel","distLabel","hpBarBg"}) do
@@ -539,6 +644,18 @@ local function createESPForModel(char)
     distLbl.TextStrokeTransparency = 0
     distLbl.Visible = false
     espData[char] = {box=box, stroke=boxStroke, nameLabel=nameLbl, distLabel=distLbl, hpBarBg=hpBarBg, hpFill=hpFill}
+
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        track(hum.Died:Connect(function()
+            hideESPData(espData[char])
+        end))
+    end
+    track(char.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            removeESPForModel(char)
+        end
+    end))
 end
 
 local function removeESPForModel(char)
@@ -559,6 +676,7 @@ local function getAimbotTarget()
     local center = Camera.ViewportSize / 2
     local myChar = LocalPlayer.Character
     if not myChar then return nil end
+    local myHrp = myChar:FindFirstChild("HumanoidRootPart")
 
     local allChars = {}
     for _, p in ipairs(Players:GetPlayers()) do
@@ -569,7 +687,7 @@ local function getAimbotTarget()
     if aimbotBotDetect then
         refreshBotCache()
         for _, model in ipairs(botCache) do
-            table.insert(allChars, model)
+            if model and model.Parent then table.insert(allChars, model) end
         end
     end
 
@@ -587,9 +705,10 @@ local function getAimbotTarget()
                     local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
                     if d <= aimbotFOV then
                         local ok = true
-                        if aimbotWallCheck then
+                        if aimbotWallCheck and myHrp then
                             aimRayParams.FilterDescendantsInstances = {char, myChar}
-                            local r = workspace:Raycast(Camera.CFrame.Position, targetPart.Position - Camera.CFrame.Position, aimRayParams)
+                            local origin = myHrp.Position + Vector3.new(0, 1.5, 0)
+                            local r = workspace:Raycast(origin, targetPart.Position - origin, aimRayParams)
                             if r then ok = false end
                         end
                         if ok and d < shortest then shortest, closest = d, targetPart end
@@ -896,15 +1015,12 @@ makeToggle(espPage, "ESP Ac/Kapat", 10, function(s)
         end
         if espBotDetect then
             refreshBotCache()
-            for _, model in ipairs(botCache) do createESPForModel(model) end
+            for _, model in ipairs(botCache) do
+                if model and model.Parent then createESPForModel(model) end
+            end
         end
     else
-        for _, data in pairs(espData) do
-            if data.box then data.box.Visible = false end
-            if data.nameLabel then data.nameLabel.Visible = false end
-            if data.distLabel then data.distLabel.Visible = false end
-            if data.hpBarBg then data.hpBarBg.Visible = false end
-        end
+        for _, data in pairs(espData) do hideESPData(data) end
     end
 end, "esp")
 makeToggle(espPage, "Isim Goster", 50, function(s) espShowName = s end)
@@ -923,7 +1039,7 @@ makeToggle(espPage, "Botlari Algila", 230, function(s)
     elseif espEnabled then
         refreshBotCache()
         for _, model in ipairs(botCache) do
-            if not espData[model] then createESPForModel(model) end
+            if model and model.Parent and not espData[model] then createESPForModel(model) end
         end
     end
 end)
@@ -1270,10 +1386,10 @@ task.spawn(function()
     end
 end)
 
--- ESP loop
+-- ESP loop (FIX: parent filter + faster + died response)
 task.spawn(function()
     while true do
-        task.wait(espEnabled and 0.05 or 0.4)
+        task.wait(espEnabled and 0.03 or 0.4)
         if espEnabled then
             local _, myPos = safeCharacter()
             if myPos then
@@ -1286,7 +1402,9 @@ task.spawn(function()
                 if espBotDetect then
                     refreshBotCache()
                     for _, model in ipairs(botCache) do
-                        table.insert(allChars, model)
+                        if model and model.Parent then
+                            table.insert(allChars, model)
+                        end
                     end
                 end
 
@@ -1334,16 +1452,13 @@ task.spawn(function()
                                         data.hpFill.BackgroundColor3 = Color3.fromRGB(math.floor(255*(1-hpPct)), math.floor(255*hpPct), 0)
                                     end
                                 else
-                                    data.box.Visible=false; data.nameLabel.Visible=false
-                                    data.distLabel.Visible=false; data.hpBarBg.Visible=false
+                                    hideESPData(data)
                                 end
                             else
-                                data.box.Visible=false; data.nameLabel.Visible=false
-                                data.distLabel.Visible=false; data.hpBarBg.Visible=false
+                                hideESPData(data)
                             end
                         else
-                            data.box.Visible=false; data.nameLabel.Visible=false
-                            data.distLabel.Visible=false; data.hpBarBg.Visible=false
+                            hideESPData(data)
                         end
                     end
                 end
@@ -1418,4 +1533,4 @@ end)
 
 captureOriginal(LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait())
 
-print("STRXcahts v33-BOTFIX | deep bot detection enabled")
+print("STRXcahts v34 | fly hybrid + ws enforcer + esp visible fix")
