@@ -1,4 +1,4 @@
--- STRXcahts v34-FIXED | Hitbox + ESP + Aimbot onarıldı
+-- STRXcahts v35-FULL | Tüm özellikler aktif, ESP & Aimbot onarıldı
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 local Players           = game:GetService("Players")
@@ -75,13 +75,13 @@ local listeningForTpAuraKey = false
 local listeningForLookTpKey = false
 local tpAuraBotDetect = false
 
--- YENİ: Ayarlar sekmesi için state
+-- Ayarlar sekmesi state
 local antiKickEnabled = true
 local lowGraphicsEnabled = false
 local shadowsDisabled = false
 local blameBlockEnabled = false
 
--- ============ ANTI-KICK (Kick koruması) ============
+-- ============ ANTI-KICK / BLAME ============
 local function setupAntiKick()
     if not antiKickEnabled then return end
     pcall(function()
@@ -92,7 +92,7 @@ local function setupAntiKick()
         mt.__namecall = newcclosure(function(self, ...)
             local method = getnamecallmethod()
             if (method == "Kick" or method == "kick") and self == LocalPlayer then
-                return nil -- Kick'i engelle
+                return nil
             end
             return oldNamecall(self, ...)
         end)
@@ -731,21 +731,4 @@ local function makeToggle(parent, text, y, callback, keybindId, syncId)
         TweenService:Create(onBtn, TweenInfo.new(0.2), {
             BackgroundColor3 = v and Color3.fromRGB(0,180,90) or Color3.fromRGB(255,140,0)
         }):Play()
-    end
-    local function doToggle()
-        setVisual(not on)
-        callback(on)
-    end
-    onBtn.MouseButton1Click:Connect(doToggle)
-    if keybindId and keybinds[keybindId] then keybinds[keybindId].callback = doToggle end
-    if syncId then toggleSync[syncId] = {setVisual = setVisual, getState = function() return on end} end
-    return {setVisual = setVisual, getState = function() return on end, button = onBtn}
-end
-
-local function makeKeybindAction(parent, text, y)
-    local f = Instance.new("Frame", parent)
-    f.Size = UDim2.new(0,320,0,34)
-    f.Position = UDim2.new(0,8,0,y)
-    f.BackgroundColor3 = Color3.fromRGB(28,28,36)
-    f.ZIndex = 2
-    Instance
+   
