@@ -1,4 +1,4 @@
--- STRXcahts v32-HBOT-IRON | v32 + Iron Man Fly + Cyberpunk Menu
+-- STRXcahts v32-HBOT-IRON | Full & Complete | Xeno Ready
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 local Players           = game:GetService("Players")
@@ -203,7 +203,7 @@ local function isPlayerVisible(targetChar)
     return r == nil
 end
 
--- ============ THRUSTER (YENİ) ============
+-- ============ THRUSTER ============
 local function createThruster(hrp)
     local att = Instance.new("Attachment")
     att.Name = "STRX_ThrusterAtt"
@@ -302,7 +302,6 @@ local function startFly()
             local flat = Vector3.new(look.X, 0, look.Z)
             if flat.Magnitude > 0.01 then
                 local cf = CFrame.lookAt(r.Position, r.Position + flat.Unit)
-                -- Iron Man öne yatma
                 local horizDir = Vector3.new(dir.X, 0, dir.Z)
                 if horizDir.Magnitude > 0.1 then
                     local dot = horizDir.Unit:Dot(flat.Unit)
@@ -524,7 +523,6 @@ local FOVStroke = Instance.new("UIStroke", FOVFrame)
 FOVStroke.Color = THEME.primary
 FOVStroke.Thickness = 2
 
--- Watermark (cooler)
 local wmFrame = Instance.new("Frame", WatermarkGui)
 wmFrame.Size = UDim2.new(0, 210, 0, 28)
 wmFrame.Position = UDim2.new(1, -220, 0, 10)
@@ -741,3 +739,16 @@ local function makeToggle(parent, text, y, callback, keybindId, syncId)
     local kbBtn = nil
     if keybindId and keybinds[keybindId] then
         kbBtn = Instance.new("TextButton", f)
+        kbBtn.Size = UDim2.new(0,54,0,22)
+        kbBtn.Position = UDim2.new(1,-118,0.5,-11)
+        kbBtn.BackgroundColor3 = Color3.fromRGB(45,45,55)
+        kbBtn.Text = keybinds[keybindId].key and keybinds[keybindId].key.Name or "Yok"
+        kbBtn.TextColor3 = Color3.new(1,1,1)
+        kbBtn.Font = Enum.Font.GothamBold
+        kbBtn.TextSize = 10
+        kbBtn.ZIndex = 2
+        Instance.new("UICorner", kbBtn).CornerRadius = UDim.new(0,5)
+        kbBtn.MouseButton1Click:Connect(function() listeningForBind = keybindId; kbBtn.Text = "..." end)
+        keybindButtons[keybindId] = kbBtn
+    end
+    local onBtn = Instance.new
