@@ -1,4 +1,4 @@
--- STRXcahts v32-HBOT | hitbox bot support
+-- STRXcahts v33-FIXED | hitbox bot support + loading + settings + anti-kick
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 local Players           = game:GetService("Players")
@@ -7,6 +7,7 @@ local UserInputService  = game:GetService("UserInputService")
 local TweenService      = game:GetService("TweenService")
 local GuiService        = game:GetService("GuiService")
 local VirtualUser       = game:GetService("VirtualUser")
+local Lighting          = game:GetService("Lighting")
 local LocalPlayer       = Players.LocalPlayer
 local Camera            = workspace.CurrentCamera
 
@@ -33,7 +34,7 @@ local rgbEnabled = true
 local rgbHue = 0
 local showFps = true
 local hitboxEnabled, hitboxSize = false, 5
-local hitboxBotDetect = false       -- YENİ
+local hitboxBotDetect = false
 local camFovEnabled, camFovValue = false, 70
 local espEnabled = false
 local espShowName, espShowHealth, espShowDistance = true, true, true
@@ -74,6 +75,43 @@ local listeningForTpAuraKey = false
 local listeningForLookTpKey = false
 local tpAuraBotDetect = false
 
+-- YENİ: Ayarlar sekmesi için state
+local antiKickEnabled = true
+local lowGraphicsEnabled = false
+local shadowsDisabled = false
+local blameBlockEnabled = false
+
+-- ============ ANTI-KICK (Kick koruması) ============
+local function setupAntiKick()
+    if not antiKickEnabled then return end
+    pcall(function()
+        local mt = getrawmetatable(game)
+        if not mt then return end
+        local oldNamecall = mt.__namecall
+        setreadonly(mt, false)
+        mt.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            if (method == "Kick" or method == "kick") and self == LocalPlayer then
+                return nil -- Kick'i engelle
+            end
+            return oldNamecall(self, ...)
+        end)
+        setreadonly(mt, true)
+    end)
+end
+setupAntiKick()
+
+-- YENİ: Suçlama önleme (blame)
+local function setupBlameBlock()
+    if not blameBlockEnabled then return end
+    pcall(function()
+        local oldBlame = LocalPlayer.Blame
+        -- Blame fonksiyonunu devre dışı bırak
+        LocalPlayer.Blame = function() end
+    end)
+end
+setupBlameBlock()
+
 -- ============ BOT/MONSTER CACHE ============
 local botCache = {}
 local botCacheTime = 0
@@ -105,7 +143,7 @@ local function scanModelRecursive(model, out)
 end
 
 local function refreshBotCache()
-    if tick() - botCacheTime < 0.2 then return end
+    if tick() - botCacheTime < 0.3 then return end -- 0.2'den 0.3'e çıkarıldı (performans)
     botCacheTime = tick()
     local newCache = {}
     for _, obj in ipairs(workspace:GetChildren()) do
@@ -364,7 +402,6 @@ local function hitboxLoop()
     if hitboxLoopActive then return end
     hitboxLoopActive = true
     while hitboxEnabled do
-        -- Hedef listesi: oyuncular + (toggle açıksa) botlar
         local targets = {}
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LocalPlayer and p.Character then
@@ -409,13 +446,84 @@ local function cleanup()
     if flyBG then pcall(function() flyBG:Destroy() end) flyBG = nil end
     if spinAV then pcall(function() spinAV:Destroy() end) spinAV = nil end
     pcall(function() RunService:UnbindFromRenderStep("STRX_Aimbot_Move") end)
-    for _, name in ipairs({"STRXcahtsMenu","STRX_ESPGui","STRX_FOVGui","STRX_Watermark"}) do
+    for _, name in ipairs({"STRXcahtsMenu","STRX_ESPGui","STRX_FOVGui","STRX_Watermark","STRX_Loading"}) do
         local g = guiParent:FindFirstChild(name)
         if g then pcall(function() g:Destroy() end) end
     end
     _G.STRXcahts = nil
 end
 _G.STRXcahts = {Cleanup = cleanup}
+
+-- ============ LOADING SCREEN (YENİ) ============
+local function showLoadingScreen(callback)
+    local loadingGui = Instance.new("ScreenGui")
+    loadingGui.Name = "STRX_Loading"
+    loadingGui.Parent = guiParent
+    loadingGui.ResetOnSpawn = false
+    loadingGui.IgnoreGuiInset = true
+    loadingGui.DisplayOrder = 999
+
+    local bg = Instance.new("Frame", loadingGui)
+    bg.Size = UDim2.new(1, 0, 1, 0)
+    bg.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    bg.BorderSizePixel = 0
+
+    local title = Instance.new("TextLabel", bg)
+    title.Size = UDim2.new(1, 0, 0.2, 0)
+    title.Position = UDim2.new(0, 0, 0.3, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "STRXCHATS"
+    title.TextColor3 = Color3.fromRGB(255, 140, 0)
+    title.Font = Enum.Font.GothamBlack
+    title.TextSize = 48
+    title.TextScaled = true
+
+    local barBg = Instance.new("Frame", bg)
+    barBg.Size = UDim2.new(0.6, 0, 0.02, 0)
+    barBg.Position = UDim2.new(0.2, 0, 0.65, 0)
+    barBg.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    barBg.BorderSizePixel = 0
+    Instance.new("UICorner", barBg).CornerRadius = UDim.new(1, 0)
+
+    local barFill = Instance.new("Frame", barBg)
+    barFill.Size = UDim2.new(0, 0, 1, 0)
+    barFill.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
+    barFill.BorderSizePixel = 0
+    Instance.new("UICorner", barFill).CornerRadius = UDim.new(1, 0)
+
+    local progressLabel = Instance.new("TextLabel", bg)
+    progressLabel.Size = UDim2.new(1, 0, 0.05, 0)
+    progressLabel.Position = UDim2.new(0, 0, 0.7, 0)
+    progressLabel.BackgroundTransparency = 1
+    progressLabel.Text = "0%"
+    progressLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    progressLabel.Font = Enum.Font.GothamBold
+    progressLabel.TextSize = 18
+
+    -- Tween ile %0'dan %100'e
+    local tween = TweenService:Create(barFill, TweenInfo.new(3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(1, 0, 1, 0)})
+    tween:Play()
+
+    local progressConnection
+    progressConnection = RunService.RenderStepped:Connect(function()
+        local currentSize = barFill.AbsoluteSize.X / barBg.AbsoluteSize.X
+        local percent = math.floor(currentSize * 100)
+        progressLabel.Text = percent .. "%"
+        if percent >= 100 then
+            if progressConnection then progressConnection:Disconnect() end
+            task.wait(0.3)
+            -- Fade out
+            TweenService:Create(bg, TweenInfo.new(0.8), {BackgroundTransparency = 1}):Play()
+            TweenService:Create(title, TweenInfo.new(0.8), {TextTransparency = 1}):Play()
+            TweenService:Create(barBg, TweenInfo.new(0.8), {BackgroundTransparency = 1}):Play()
+            TweenService:Create(barFill, TweenInfo.new(0.8), {BackgroundTransparency = 1}):Play()
+            TweenService:Create(progressLabel, TweenInfo.new(0.8), {TextTransparency = 1}):Play()
+            task.wait(0.9)
+            loadingGui:Destroy()
+            callback()
+        end
+    end)
+end
 
 -- ============ GUIs ============
 local function newScreenGui(name, order)
@@ -989,7 +1097,7 @@ sfBtn.MouseButton1Click:Connect(function()
 end)
 
 makeToggle(aimbotPage, "Botlari Algila (Aimbot)", 364, function(s) aimbotBotDetect = s end)
-makeToggle(aimbotPage, "Hitbox Botlari Algila", 404, function(s) hitboxBotDetect = s end) -- YENİ
+makeToggle(aimbotPage, "Hitbox Botlari Algila", 404, function(s) hitboxBotDetect = s end)
 
 -- TP
 local tpAuraKbBtn = makeKeybindAction(tpPage, "TP Aura (Rastgele)", 10)
@@ -1032,9 +1140,39 @@ makeSlider(extraPage, "Kamera FOV Degeri", 50, 120, camFovValue, 90, function(v)
     if camFovEnabled then Camera.FieldOfView = v end
 end)
 
--- AYARLAR
+-- AYARLAR (YENİ ÖZELLİKLER EKLENDİ)
 makeToggle(settingsPage, "RGB Renk Modu", 10, function(s) rgbEnabled = s end)
 makeToggle(settingsPage, "FPS Sayaci", 50, function(s) showFps = s end)
+makeToggle(settingsPage, "Anti-Kick Korumasi", 90, function(s)
+    antiKickEnabled = s
+    if s then setupAntiKick() end
+end)
+makeToggle(settingsPage, "Suclama Onleme (Blame)", 130, function(s)
+    blameBlockEnabled = s
+    if s then setupBlameBlock() end
+end)
+makeToggle(settingsPage, "Dusuk Grafik Modu", 170, function(s)
+    lowGraphicsEnabled = s
+    if s then
+        pcall(function()
+            Lighting.GlobalShadows = false
+            Lighting.FogEnd = 1e6
+            settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+        end)
+    end
+end)
+makeToggle(settingsPage, "Golgeleri Kapat", 210, function(s)
+    shadowsDisabled = s
+    pcall(function()
+        Lighting.GlobalShadows = not s
+    end)
+end)
+makeButton(settingsPage, "Arayuzu Yeniden Yukle", 8, 260, 320, 35, Color3.fromRGB(60,140,255), function()
+    -- Basit yeniden yükleme: menüyü kapat/aç
+    ScreenGui.Enabled = false
+    task.wait(0.2)
+    ScreenGui.Enabled = true
+end)
 
 -- PAGE SWITCH
 local pages = {Player=playerPage, ESP=espPage, Aimbot=aimbotPage, TP=tpPage, Ekstra=extraPage, Ayarlar=settingsPage}
@@ -1060,15 +1198,19 @@ track(UserInputService.InputEnded:Connect(function(i)
     end
 end))
 
--- INPUT
+-- INPUT (DÜZELTİLDİ: gameProcessedEvent ve EnumType kontrolü)
 track(UserInputService.InputBegan:Connect(function(input, gp)
+    -- Önce tuş atama modları
     if listeningForBind then
-        if input.UserInputType == Enum.UserInputType.Keyboard then
-            local id = listeningForBind
-            listeningForBind = nil
-            if keybinds[id] then
+        local id = listeningForBind
+        listeningForBind = nil
+        if keybinds[id] then
+            if input.UserInputType == Enum.UserInputType.Keyboard then
                 keybinds[id].key = input.KeyCode
                 if keybindButtons[id] then keybindButtons[id].Text = input.KeyCode.Name end
+            elseif input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2 then
+                keybinds[id].key = input.UserInputType
+                if keybindButtons[id] then keybindButtons[id].Text = (input.UserInputType == Enum.UserInputType.MouseButton1) and "Sol Tik" or "Sag Tik" end
             end
         end
         return
@@ -1100,7 +1242,10 @@ track(UserInputService.InputBegan:Connect(function(input, gp)
         end
         return
     end
+    -- Oyun girdisi filtresi (sohbet, UI vs.)
     if gp then return end
+
+    -- TP Aura / Look TP kısayolları
     if tpAuraKeybind and input.KeyCode == tpAuraKeybind then
         randomPlayerTp()
         return
@@ -1109,17 +1254,30 @@ track(UserInputService.InputBegan:Connect(function(input, gp)
         lookTp()
         return
     end
+    -- Tıkla-ışınlan
     if clickTpEnabled and input.UserInputType == Enum.UserInputType.MouseButton1 and not ScreenGui.Enabled then
         teleportToMouse()
     end
+    -- Menü aç/kapat
     if keybinds.menu.key == input.KeyCode then
         ScreenGui.Enabled = not ScreenGui.Enabled
         return
     end
+    -- Diğer keybind'ler (klavye veya mouse)
     for id, kb in pairs(keybinds) do
-        if id ~= "menu" and kb.key and kb.key == input.KeyCode and kb.callback then
-            kb.callback()
-            break
+        if id ~= "menu" and kb.key and kb.callback then
+            local matched = false
+            if typeof(kb.key) == "EnumItem" then
+                if kb.key.EnumType == Enum.KeyCode and input.KeyCode == kb.key then
+                    matched = true
+                elseif kb.key.EnumType == Enum.UserInputType and input.UserInputType == kb.key then
+                    matched = true
+                end
+            end
+            if matched then
+                kb.callback()
+                break
+            end
         end
     end
 end))
@@ -1373,4 +1531,9 @@ end)
 
 captureOriginal(LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait())
 
-print("STRXcahts v32-HBOT | hitbox bot support enabled")
+-- Yükleme ekranını göster, sonra menüyü aç
+ScreenGui.Enabled = false
+showLoadingScreen(function()
+    ScreenGui.Enabled = true
+    print("STRXcahts v33-FIXED | yükleme tamamlandı, menü açıldı")
+end)
