@@ -1,4 +1,4 @@
--- STRXcahts v37-FULL | WalkSpeed Fix + Hitbox Repair + Bot Detection
+-- STRXcahts v38-FULL | WalkSpeed + Hitbox + Bot Detection + Tüm UI
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 local Players           = game:GetService("Players")
@@ -121,7 +121,6 @@ local function isBotCharacter(model)
     local hum = model:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return false end
     
-    -- Herhangi bir BasePart yeterli
     for _, child in ipairs(model:GetChildren()) do
         if child:IsA("BasePart") then
             return true
@@ -184,7 +183,6 @@ local function applyWalkSpeed()
     end
 end
 
--- WalkSpeed'i her 0.1 saniyede bir kontrol et (oyun sıfırlarsa geri gelsin)
 task.spawn(function()
     while true do
         task.wait(0.1)
@@ -407,18 +405,15 @@ local function hitboxLoop()
     if hitboxLoopActive then return end
     hitboxLoopActive = true
     
-    -- Hedef parça isimleri (R6 ve R15 uyumlu)
     local targetPartNames = {"Head", "Torso", "UpperTorso", "LowerTorso", "HumanoidRootPart"}
     
     while hitboxEnabled do
         local targets = {}
-        -- Oyuncuları ekle
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LocalPlayer and p.Character then
                 table.insert(targets, p.Character)
             end
         end
-        -- Botları ekle
         if hitboxBotDetect then
             refreshBotCache()
             for _, model in ipairs(botCache) do
@@ -434,17 +429,15 @@ local function hitboxLoop()
                         if not originalSizes[part] then originalSizes[part] = part.Size end
                         local s = originalSizes[part]
                         pcall(function()
-                            -- Orijinal boyuttan küçük olmamak şartıyla büyüt
                             part.Size = Vector3.new(math.max(s.X, hitboxSize), math.max(s.Y, hitboxSize), math.max(s.Z, hitboxSize))
                         end)
                     end
                 end
             end
         end
-        task.wait(0.25) -- Oyunu dondurmamak için bekleme süresi
+        task.wait(0.25)
     end
     
-    -- Kapatınca eski boyutlara dön
     for part, size in pairs(originalSizes) do
         if part and part.Parent then pcall(function() part.Size = size end) end
     end
@@ -747,4 +740,20 @@ local function makeToggle(parent, text, y, callback, keybindId, syncId)
     onBtn.Text = "OFF"
     onBtn.TextColor3 = Color3.new(1,1,1)
     onBtn.Font = Enum.Font.GothamBold
-    onBtn
+    onBtn.TextSize = 11
+    onBtn.ZIndex = 2
+    Instance.new("UICorner", onBtn).CornerRadius = UDim.new(0,5)
+    local on = false
+    local function setVisual(v)
+        on = v
+        onBtn.Text = v and "ON" or "OFF"
+        TweenService:Create(onBtn, TweenInfo.new(0.2), {
+            BackgroundColor3 = v and Color3.fromRGB(0,180,90) or Color3.fromRGB(255,140,0)
+        }):Play()
+    end
+    local function doToggle()
+        setVisual(not on)
+        callback(on)
+    end
+    onBtn.MouseButton1Click:Connect(doToggle)
+    if keybindId and keybinds[keybindId] then keybinds[keybindId].callback
