@@ -1,5 +1,8 @@
--- STRXcahts v34 | fly+ws+esp fixes
+-- STRXcahts v35 | anti-kick safety
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
+
+-- FIX 1: enjeksiyonda hemen islem yapma
+task.wait(1)
 
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -13,9 +16,20 @@ local Camera            = workspace.CurrentCamera
 local connections = {}
 local function track(c) table.insert(connections, c); return c end
 
+-- FIX 2: guvenli gui parent fallback
 local function getGuiParent()
     local s, r = pcall(function() return gethui() end)
-    if s and r then return r end
+    if s and r then
+        local ok = pcall(function() r:GetChildren() end)
+        if ok then return r end
+    end
+    local s2, r2 = pcall(function() return game:GetService("CoreGui") end)
+    if s2 and r2 then
+        local ok2 = pcall(function() r2:GetChildren() end)
+        if ok2 then return r2 end
+    end
+    local s3, r3 = pcall(function() return LocalPlayer:WaitForChild("PlayerGui", 10) end)
+    if s3 and r3 then return r3 end
     return game:GetService("CoreGui")
 end
 local guiParent = getGuiParent()
@@ -60,7 +74,7 @@ local originalStats  = setmetatable({}, {__mode = "k"})
 local originalSizes  = setmetatable({}, {__mode = "k"})
 local hitboxLoopActive = false
 local botScanAggressive = false
-local botScanDepth = 4
+local botScanDepth = 3
 local keybinds = {
     fly = {}, aimbot = {}, esp = {}, noclip = {}, infJump = {},
     spin = {}, walkSpeed = {}, clickTp = {},
@@ -76,7 +90,7 @@ local listeningForTpAuraKey = false
 local listeningForLookTpKey = false
 local tpAuraBotDetect = false
 
--- ============ BOT/MONSTER CACHE ============
+-- ============ BOT CACHE ============
 local botCache = {}
 local botCacheTime = 0
 
@@ -101,17 +115,14 @@ local function isBotCharacter(model)
     if model == LocalPlayer.Character then return false end
     if Players:GetPlayerFromCharacter(model) then return false end
     if not model.Parent then return false end
-
     local hum = model:FindFirstChildOfClass("Humanoid")
     if hum and hum.Health <= 0 then return false end
-
     local hrp  = model:FindFirstChild("HumanoidRootPart")
     local head = model:FindFirstChild("Head")
     local torso = model:FindFirstChild("Torso")
         or model:FindFirstChild("UpperTorso")
         or model:FindFirstChild("LowerTorso")
     local anyPart = model:FindFirstChildWhichIsA("BasePart")
-
     if hrp then return true end
     if head and torso then return true end
     if hum and anyPart then return true end
@@ -128,9 +139,7 @@ end
 local function scanInstanceRecursive(obj, out, depth, maxDepth)
     if depth > maxDepth then return end
     if obj:IsA("Model") then
-        if isBotCharacter(obj) then
-            table.insert(out, obj)
-        end
+        if isBotCharacter(obj) then table.insert(out, obj) end
         for _, child in ipairs(obj:GetChildren()) do
             if child:IsA("Model") or child:IsA("Folder") then
                 scanInstanceRecursive(child, out, depth + 1, maxDepth)
@@ -143,12 +152,15 @@ local function scanInstanceRecursive(obj, out, depth, maxDepth)
     end
 end
 
+-- FIX 3: bot tarama pcall + daha guvenli interval
 local function refreshBotCache()
-    local interval = botScanAggressive and 0.1 or 0.25
+    local interval = botScanAggressive and 0.15 or 0.4
     if tick() - botCacheTime < interval then return end
     botCacheTime = tick()
     local newCache = {}
-    scanInstanceRecursive(workspace, newCache, 0, botScanDepth)
+    pcall(function()
+        scanInstanceRecursive(workspace, newCache, 0, botScanDepth)
+    end)
     botCache = newCache
 end
 
@@ -187,42 +199,55 @@ local function applyWalkSpeed()
     local _, _, hum = safeCharacter()
     if not hum then return end
     local orig = originalStats[LocalPlayer.Character]
-    hum.WalkSpeed = walkSpeedEnabled and walkSpeedValue or (orig and orig.WalkSpeed or 16)
+    pcall(function()
+        hum.WalkSpeed = walkSpeedEnabled and walkSpeedValue or (orig and orig.WalkSpeed or 16)
+    end)
 end
 
--- FIX: WalkSpeed enforcer - oyun sifirlasa bile geri yazar
+-- FIX 4: enforcer throttle (her frame degil, 0.1s)
+local lastWsEnforce = 0
 track(RunService.Stepped:Connect(function()
     if not walkSpeedEnabled then return end
-    local _, _, hum = safeCharacter()
-    if hum and math.abs(hum.WalkSpeed - walkSpeedValue) > 0.5 then
-        pcall(function() hum.WalkSpeed = walkSpeedValue end)
-    end
+    if tick() - lastWsEnforce < 0.1 then return end
+    lastWsEnforce = tick()
+    pcall(function()
+        local _, _, hum = safeCharacter()
+        if hum and math.abs(hum.WalkSpeed - walkSpeedValue) > 0.5 then
+            hum.WalkSpeed = walkSpeedValue
+        end
+    end)
 end))
 
 local function applyJumpPower()
     local _, _, hum = safeCharacter()
     if not hum then return end
     local orig = originalStats[LocalPlayer.Character]
-    if jumpPowerEnabled then
-        hum.UseJumpPower = true
-        hum.JumpPower = jumpPowerValue
-    elseif orig then
-        hum.UseJumpPower = orig.UseJumpPower
-        if orig.UseJumpPower then hum.JumpPower = orig.JumpPower
-        else hum.JumpHeight = orig.JumpHeight end
-    end
+    pcall(function()
+        if jumpPowerEnabled then
+            hum.UseJumpPower = true
+            hum.JumpPower = jumpPowerValue
+        elseif orig then
+            hum.UseJumpPower = orig.UseJumpPower
+            if orig.UseJumpPower then hum.JumpPower = orig.JumpPower
+            else hum.JumpHeight = orig.JumpHeight end
+        end
+    end)
 end
 
--- FIX: JumpPower enforcer
+local lastJpEnforce = 0
 track(RunService.Stepped:Connect(function()
     if not jumpPowerEnabled then return end
-    local _, _, hum = safeCharacter()
-    if hum then
-        if not hum.UseJumpPower then pcall(function() hum.UseJumpPower = true end) end
-        if math.abs(hum.JumpPower - jumpPowerValue) > 0.5 then
-            pcall(function() hum.JumpPower = jumpPowerValue end)
+    if tick() - lastJpEnforce < 0.1 then return end
+    lastJpEnforce = tick()
+    pcall(function()
+        local _, _, hum = safeCharacter()
+        if hum then
+            if not hum.UseJumpPower then hum.UseJumpPower = true end
+            if math.abs(hum.JumpPower - jumpPowerValue) > 0.5 then
+                hum.JumpPower = jumpPowerValue
+            end
         end
-    end
+    end)
 end))
 
 local function isAimbotTriggered()
@@ -236,13 +261,13 @@ local function isAimbotTriggered()
     return false
 end
 
--- FIX: isPlayerVisible - kameradan degil oyuncu HRP'sinden raycast + cache
+-- FIX 5: visibility cache 0.12s (daha az raycast)
 local visibilityCache = setmetatable({}, {__mode = "k"})
 
 local function isPlayerVisible(targetChar)
     local now = tick()
     local cached = visibilityCache[targetChar]
-    if cached and now - cached.time < 0.06 then
+    if cached and now - cached.time < 0.12 then
         return cached.visible
     end
     local myChar = LocalPlayer.Character
@@ -253,27 +278,24 @@ local function isPlayerVisible(targetChar)
         or targetChar:FindFirstChild("Head")
         or targetChar:FindFirstChildWhichIsA("BasePart")
     if not targetHrp then return false end
-
     local origin = myHrp.Position + Vector3.new(0, 1.5, 0)
     local targetPos = targetHrp.Position + Vector3.new(0, 1, 0)
     local dir = targetPos - origin
-
     local p = RaycastParams.new()
     p.FilterType = Enum.RaycastFilterType.Exclude
     p.FilterDescendantsInstances = {myChar, targetChar}
     p.IgnoreWater = true
-
-    local r = workspace:Raycast(origin, dir, p)
-    local visible = (r == nil)
+    local ok, r = pcall(function() return workspace:Raycast(origin, dir, p) end)
+    local visible = ok and (r == nil)
     visibilityCache[targetChar] = {time = now, visible = visible}
     return visible
 end
 
--- ============ FLY (FIX: hybrid bodyvelocity + cframe fallback) ============
+-- ============ FLY ============
 local function destroyFlyPhysics()
-    if flyConn then flyConn:Disconnect() flyConn = nil end
-    if flyBV then flyBV:Destroy() flyBV = nil end
-    if flyBG then flyBG:Destroy() flyBG = nil end
+    if flyConn then pcall(function() flyConn:Disconnect() end) flyConn = nil end
+    if flyBV then pcall(function() flyBV:Destroy() end) flyBV = nil end
+    if flyBG then pcall(function() flyBG:Destroy() end) flyBG = nil end
 end
 
 local function startFly()
@@ -281,94 +303,89 @@ local function startFly()
     if not hrp or not hum then return end
     flyEnabled = true
     destroyFlyPhysics()
-
     pcall(function()
         hum.PlatformStand = true
         hum.AutoRotate = false
     end)
-
-    flyBV = Instance.new("BodyVelocity")
-    flyBV.Name = "STRX_FlyBV"
-    flyBV.MaxForce = Vector3.new(1e6, 1e6, 1e6)
-    flyBV.Velocity = Vector3.zero
-    flyBV.Parent = hrp
-
-    flyBG = Instance.new("BodyGyro")
-    flyBG.Name = "STRX_FlyBG"
-    flyBG.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
-    flyBG.P = 10000
-    flyBG.D = 500
-    flyBG.Parent = hrp
-
+    pcall(function()
+        flyBV = Instance.new("BodyVelocity")
+        flyBV.Name = "STRX_FlyBV"
+        flyBV.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+        flyBV.Velocity = Vector3.zero
+        flyBV.Parent = hrp
+    end)
+    pcall(function()
+        flyBG = Instance.new("BodyGyro")
+        flyBG.Name = "STRX_FlyBG"
+        flyBG.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
+        flyBG.P = 10000
+        flyBG.D = 500
+        flyBG.Parent = hrp
+    end)
     local lastPos = hrp.Position
     local cframeMode = false
     local stuckFrames = 0
-
     flyConn = RunService.RenderStepped:Connect(function(dt)
         if not flyEnabled then return end
-        local _, r = safeCharacter()
-        if not r then return end
-
-        local camCF = Camera.CFrame
-        local dir = Vector3.zero
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += camCF.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= camCF.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= camCF.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += camCF.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.E) then dir += Vector3.yAxis end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Q) then dir -= Vector3.yAxis end
-
-        local targetVel = dir.Magnitude > 0 and (dir.Unit * flySpeed) or Vector3.zero
-
-        if not cframeMode then
-            if not flyBV or not flyBV.Parent then
-                flyBV = Instance.new("BodyVelocity")
-                flyBV.Name = "STRX_FlyBV"
-                flyBV.MaxForce = Vector3.new(1e6, 1e6, 1e6)
-                flyBV.Velocity = Vector3.zero
-                flyBV.Parent = r
-            end
-            if not flyBG or not flyBG.Parent then
-                flyBG = Instance.new("BodyGyro")
-                flyBG.Name = "STRX_FlyBG"
-                flyBG.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
-                flyBG.P = 10000
-                flyBG.D = 500
-                flyBG.Parent = r
-            end
-
-            flyBV.Velocity = flyBV.Velocity:Lerp(targetVel, math.min(1, dt * 10))
-            if flyBG then
+        pcall(function()
+            local _, r = safeCharacter()
+            if not r then return end
+            local camCF = Camera.CFrame
+            local dir = Vector3.zero
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += camCF.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= camCF.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= camCF.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += camCF.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.E) then dir += Vector3.yAxis end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Q) then dir -= Vector3.yAxis end
+            local targetVel = dir.Magnitude > 0 and (dir.Unit * flySpeed) or Vector3.zero
+            if not cframeMode then
+                if not flyBV or not flyBV.Parent then
+                    flyBV = Instance.new("BodyVelocity")
+                    flyBV.Name = "STRX_FlyBV"
+                    flyBV.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+                    flyBV.Velocity = Vector3.zero
+                    flyBV.Parent = r
+                end
+                if not flyBG or not flyBG.Parent then
+                    flyBG = Instance.new("BodyGyro")
+                    flyBG.Name = "STRX_FlyBG"
+                    flyBG.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
+                    flyBG.P = 10000
+                    flyBG.D = 500
+                    flyBG.Parent = r
+                end
+                flyBV.Velocity = flyBV.Velocity:Lerp(targetVel, math.min(1, dt * 10))
+                if flyBG then
+                    local look = camCF.LookVector
+                    local flat = Vector3.new(look.X, 0, look.Z)
+                    if flat.Magnitude > 0.01 then
+                        flyBG.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit)
+                    end
+                end
+                if targetVel.Magnitude > 0 then
+                    if (r.Position - lastPos).Magnitude < 0.02 then
+                        stuckFrames = stuckFrames + 1
+                        if stuckFrames > 8 then
+                            cframeMode = true
+                            if flyBV then flyBV:Destroy() flyBV = nil end
+                            if flyBG then flyBG:Destroy() flyBG = nil end
+                        end
+                    else
+                        stuckFrames = 0
+                    end
+                end
+            else
+                r.AssemblyLinearVelocity = targetVel
+                r.CFrame = r.CFrame + targetVel * dt
                 local look = camCF.LookVector
                 local flat = Vector3.new(look.X, 0, look.Z)
                 if flat.Magnitude > 0.01 then
-                    flyBG.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit)
+                    r.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit)
                 end
             end
-
-            if targetVel.Magnitude > 0 then
-                if (r.Position - lastPos).Magnitude < 0.02 then
-                    stuckFrames = stuckFrames + 1
-                    if stuckFrames > 8 then
-                        cframeMode = true
-                        if flyBV then flyBV:Destroy() flyBV = nil end
-                        if flyBG then flyBG:Destroy() flyBG = nil end
-                    end
-                else
-                    stuckFrames = 0
-                end
-            end
-        else
-            pcall(function() r.AssemblyLinearVelocity = targetVel end)
-            r.CFrame = r.CFrame + targetVel * dt
-            local look = camCF.LookVector
-            local flat = Vector3.new(look.X, 0, look.Z)
-            if flat.Magnitude > 0.01 then
-                r.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit)
-            end
-        end
-
-        lastPos = r.Position
+            lastPos = r.Position
+        end)
     end)
     if toggleSync.fly then toggleSync.fly.setVisual(true) end
 end
@@ -376,46 +393,50 @@ end
 local function stopFly()
     flyEnabled = false
     destroyFlyPhysics()
-    local _, _, hum = safeCharacter()
-    if hum then
-        pcall(function()
+    pcall(function()
+        local _, _, hum = safeCharacter()
+        if hum then
             hum.PlatformStand = false
             hum.AutoRotate = true
-        end)
-    end
+        end
+    end)
     if toggleSync.fly then toggleSync.fly.setVisual(false) end
 end
 
 -- ============ SPIN / NOCLIP ============
 local function toggleSpin(state)
     spinEnabled = state
-    local _, hrp = safeCharacter()
-    if not hrp then return end
-    if spinAV then spinAV:Destroy() spinAV = nil end
-    if spinEnabled then
-        local att = hrp:FindFirstChild("SpinAtt")
-        if not att then att = Instance.new("Attachment") att.Name = "SpinAtt" att.Parent = hrp end
-        spinAV = Instance.new("AngularVelocity")
-        spinAV.Attachment0 = att
-        spinAV.MaxTorque = math.huge
-        spinAV.AngularVelocity = Vector3.new(0, spinSpeed, 0)
-        spinAV.Parent = hrp
-    end
+    pcall(function()
+        local _, hrp = safeCharacter()
+        if not hrp then return end
+        if spinAV then spinAV:Destroy() spinAV = nil end
+        if spinEnabled then
+            local att = hrp:FindFirstChild("SpinAtt")
+            if not att then att = Instance.new("Attachment") att.Name = "SpinAtt" att.Parent = hrp end
+            spinAV = Instance.new("AngularVelocity")
+            spinAV.Attachment0 = att
+            spinAV.MaxTorque = math.huge
+            spinAV.AngularVelocity = Vector3.new(0, spinSpeed, 0)
+            spinAV.Parent = hrp
+        end
+    end)
 end
 
 local function toggleNoclip(state)
     noclipEnabled = state
-    if noclipConn then noclipConn:Disconnect() noclipConn = nil end
+    if noclipConn then pcall(function() noclipConn:Disconnect() end) noclipConn = nil end
     if noclipEnabled then
         local last = 0
         noclipConn = RunService.Stepped:Connect(function()
-            if tick() - last < 0.1 then return end
+            if tick() - last < 0.15 then return end
             last = tick()
-            local char = LocalPlayer.Character
-            if not char then return end
-            for _, v in ipairs(char:GetDescendants()) do
-                if v:IsA("BasePart") then v.CanCollide = false end
-            end
+            pcall(function()
+                local char = LocalPlayer.Character
+                if not char then return end
+                for _, v in ipairs(char:GetDescendants()) do
+                    if v:IsA("BasePart") then v.CanCollide = false end
+                end
+            end)
         end)
     end
 end
@@ -431,17 +452,19 @@ end
 local function teleportToMouse()
     local _, hrp = safeCharacter()
     if not hrp then return end
-    local m = UserInputService:GetMouseLocation()
-    local inset = GuiService:GetGuiInset()
-    local ray = Camera:ViewportPointToRay(m.X, m.Y - inset.Y)
-    local p = RaycastParams.new()
-    p.FilterDescendantsInstances = {LocalPlayer.Character}
-    p.FilterType = Enum.RaycastFilterType.Exclude
-    local hit = workspace:Raycast(ray.Origin, ray.Direction * 5000, p)
-    if hit then
-        savedPosition = hrp.CFrame
-        teleportCharacterTo(CFrame.new(hit.Position + Vector3.new(0, 3, 0)))
-    end
+    pcall(function()
+        local m = UserInputService:GetMouseLocation()
+        local inset = GuiService:GetGuiInset()
+        local ray = Camera:ViewportPointToRay(m.X, m.Y - inset.Y)
+        local p = RaycastParams.new()
+        p.FilterDescendantsInstances = {LocalPlayer.Character}
+        p.FilterType = Enum.RaycastFilterType.Exclude
+        local hit = workspace:Raycast(ray.Origin, ray.Direction * 5000, p)
+        if hit then
+            savedPosition = hrp.CFrame
+            teleportCharacterTo(CFrame.new(hit.Position + Vector3.new(0, 3, 0)))
+        end
+    end)
 end
 
 local function goBack()
@@ -464,11 +487,13 @@ local function randomPlayerTp()
     if tpAuraBotDetect then
         refreshBotCache()
         for _, model in ipairs(botCache) do
-            local hrp = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Head") or model:FindFirstChildWhichIsA("BasePart")
-            if hrp then
-                local hum = model:FindFirstChildOfClass("Humanoid")
-                if not hum or hum.Health > 0 then
-                    table.insert(candidates, hrp)
+            if model and model.Parent then
+                local hrp = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Head") or model:FindFirstChildWhichIsA("BasePart")
+                if hrp then
+                    local hum = model:FindFirstChildOfClass("Humanoid")
+                    if not hum or hum.Health > 0 then
+                        table.insert(candidates, hrp)
+                    end
                 end
             end
         end
@@ -485,16 +510,18 @@ end
 local function lookTp()
     local _, hrp = safeCharacter()
     if not hrp then return end
-    local vp = Camera.ViewportSize
-    local ray = Camera:ViewportPointToRay(vp.X / 2, vp.Y / 2)
-    local p = RaycastParams.new()
-    p.FilterDescendantsInstances = {LocalPlayer.Character}
-    p.FilterType = Enum.RaycastFilterType.Exclude
-    local hit = workspace:Raycast(ray.Origin, ray.Direction * 5000, p)
-    if hit then
-        savedPosition = hrp.CFrame
-        teleportCharacterTo(CFrame.new(hit.Position + Vector3.new(0, 3, 0)))
-    end
+    pcall(function()
+        local vp = Camera.ViewportSize
+        local ray = Camera:ViewportPointToRay(vp.X / 2, vp.Y / 2)
+        local p = RaycastParams.new()
+        p.FilterDescendantsInstances = {LocalPlayer.Character}
+        p.FilterType = Enum.RaycastFilterType.Exclude
+        local hit = workspace:Raycast(ray.Origin, ray.Direction * 5000, p)
+        if hit then
+            savedPosition = hrp.CFrame
+            teleportCharacterTo(CFrame.new(hit.Position + Vector3.new(0, 3, 0)))
+        end
+    end)
 end
 
 -- ============ HITBOX ============
@@ -502,33 +529,33 @@ local function hitboxLoop()
     if hitboxLoopActive then return end
     hitboxLoopActive = true
     while hitboxEnabled do
-        local targets = {}
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer and p.Character then
-                table.insert(targets, p.Character)
+        pcall(function()
+            local targets = {}
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and p.Character then
+                    table.insert(targets, p.Character)
+                end
             end
-        end
-        if hitboxBotDetect then
-            refreshBotCache()
-            for _, model in ipairs(botCache) do
-                if model and model.Parent then table.insert(targets, model) end
+            if hitboxBotDetect then
+                refreshBotCache()
+                for _, model in ipairs(botCache) do
+                    if model and model.Parent then table.insert(targets, model) end
+                end
             end
-        end
-        for _, char in ipairs(targets) do
-            for _, name in ipairs({"Head","HumanoidRootPart","UpperTorso","Torso","LowerTorso"}) do
-                local part = char:FindFirstChild(name)
-                if part then
-                    if not originalSizes[part] then originalSizes[part] = part.Size end
-                    local s = originalSizes[part]
-                    pcall(function()
+            for _, char in ipairs(targets) do
+                for _, name in ipairs({"Head","HumanoidRootPart","UpperTorso","Torso","LowerTorso"}) do
+                    local part = char:FindFirstChild(name)
+                    if part then
+                        if not originalSizes[part] then originalSizes[part] = part.Size end
+                        local s = originalSizes[part]
                         part.Size = Vector3.new(math.max(s.X, hitboxSize),
                                                math.max(s.Y, hitboxSize),
                                                math.max(s.Z, hitboxSize))
-                    end)
+                    end
                 end
             end
-        end
-        task.wait(0.1)
+        end)
+        task.wait(0.15)
     end
     for part, size in pairs(originalSizes) do
         if part and part.Parent then pcall(function() part.Size = size end) end
@@ -554,16 +581,19 @@ local function cleanup()
 end
 _G.STRXcahts = {Cleanup = cleanup}
 
--- ============ GUIs ============
+-- ============ GUIs (FIX: pcall wrapped) ============
 local function newScreenGui(name, order)
-    local g = Instance.new("ScreenGui")
-    g.Name = name
-    g.Parent = guiParent
-    g.ResetOnSpawn = false
-    g.IgnoreGuiInset = false
-    g.DisplayOrder = order
-    g.Enabled = true
-    return g
+    local g
+    pcall(function()
+        g = Instance.new("ScreenGui")
+        g.Name = name
+        g.Parent = guiParent
+        g.ResetOnSpawn = false
+        g.IgnoreGuiInset = false
+        g.DisplayOrder = order
+        g.Enabled = true
+    end)
+    return g or Instance.new("ScreenGui")
 end
 
 local ScreenGui   = newScreenGui("STRXcahtsMenu", 50)
@@ -600,7 +630,7 @@ wmText.TextColor3 = Color3.new(1,1,1)
 wmText.Font = Enum.Font.GothamBold
 wmText.TextSize = 12
 
--- ============ ESP (FIX: died + ancestry connections) ============
+-- ============ ESP ============
 local function hideESPData(data)
     if not data then return end
     if data.box then data.box.Visible = false end
@@ -644,17 +674,12 @@ local function createESPForModel(char)
     distLbl.TextStrokeTransparency = 0
     distLbl.Visible = false
     espData[char] = {box=box, stroke=boxStroke, nameLabel=nameLbl, distLabel=distLbl, hpBarBg=hpBarBg, hpFill=hpFill}
-
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then
-        track(hum.Died:Connect(function()
-            hideESPData(espData[char])
-        end))
+        track(hum.Died:Connect(function() hideESPData(espData[char]) end))
     end
     track(char.AncestryChanged:Connect(function(_, parent)
-        if not parent then
-            removeESPForModel(char)
-        end
+        if not parent then removeESPForModel(char) end
     end))
 end
 
@@ -677,12 +702,9 @@ local function getAimbotTarget()
     local myChar = LocalPlayer.Character
     if not myChar then return nil end
     local myHrp = myChar:FindFirstChild("HumanoidRootPart")
-
     local allChars = {}
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character then
-            table.insert(allChars, p.Character)
-        end
+        if p ~= LocalPlayer and p.Character then table.insert(allChars, p.Character) end
     end
     if aimbotBotDetect then
         refreshBotCache()
@@ -690,7 +712,6 @@ local function getAimbotTarget()
             if model and model.Parent then table.insert(allChars, model) end
         end
     end
-
     for _, char in ipairs(allChars) do
         local hum = char:FindFirstChildOfClass("Humanoid")
         local alive = (hum == nil) or (hum.Health > 0)
@@ -863,7 +884,7 @@ local function makeToggle(parent, text, y, callback, keybindId, syncId)
     end
     local function doToggle()
         setVisual(not on)
-        callback(on)
+        pcall(callback, on)
     end
     onBtn.MouseButton1Click:Connect(doToggle)
     if keybindId and keybinds[keybindId] then keybinds[keybindId].callback = doToggle end
@@ -941,7 +962,7 @@ local function makeSlider(parent, labelText, minV, maxV, default, y, onChanged)
         fill.Size = UDim2.new(rel,0,1,0)
         knob.Position = UDim2.new(rel,-7,0.5,-7)
         lbl.Text = labelText..": "..v
-        onChanged(v)
+        pcall(onChanged, v)
     end
     local function beginDrag(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
@@ -966,7 +987,7 @@ local function makeButton(parent, text, x, y, w, h, color, callback)
     btn.AutoButtonColor = false
     btn.ZIndex = 3
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0,7)
-    btn.MouseButton1Click:Connect(callback)
+    btn.MouseButton1Click:Connect(function() pcall(callback) end)
     return btn
 end
 
@@ -1186,11 +1207,11 @@ Instance.new("UICorner", tpInfo).CornerRadius = UDim.new(0,7)
 makeToggle(extraPage, "Tikla-Isinlan", 10, function(s) clickTpEnabled = s end, "clickTp")
 makeToggle(extraPage, "Kamera FOV Ac/Kapat", 50, function(s)
     camFovEnabled = s
-    if not s then Camera.FieldOfView = 70 end
+    if not s then pcall(function() Camera.FieldOfView = 70 end) end
 end)
 makeSlider(extraPage, "Kamera FOV Degeri", 50, 120, camFovValue, 90, function(v)
     camFovValue = v
-    if camFovEnabled then Camera.FieldOfView = v end
+    if camFovEnabled then pcall(function() Camera.FieldOfView = v end) end
 end)
 
 -- AYARLAR
@@ -1212,7 +1233,7 @@ showPage("Player")
 -- SLIDER GLOBAL INPUT
 track(UserInputService.InputChanged:Connect(function(i)
     if activeSlider and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
-        activeSlider(i.Position.X)
+        pcall(activeSlider, i.Position.X)
     end
 end))
 track(UserInputService.InputEnded:Connect(function(i)
@@ -1262,14 +1283,8 @@ track(UserInputService.InputBegan:Connect(function(input, gp)
         return
     end
     if gp then return end
-    if tpAuraKeybind and input.KeyCode == tpAuraKeybind then
-        randomPlayerTp()
-        return
-    end
-    if lookTpKeybind and input.KeyCode == lookTpKeybind then
-        lookTp()
-        return
-    end
+    if tpAuraKeybind and input.KeyCode == tpAuraKeybind then randomPlayerTp(); return end
+    if lookTpKeybind and input.KeyCode == lookTpKeybind then lookTp(); return end
     if clickTpEnabled and input.UserInputType == Enum.UserInputType.MouseButton1 and not ScreenGui.Enabled then
         teleportToMouse()
     end
@@ -1287,8 +1302,10 @@ end))
 
 track(UserInputService.JumpRequest:Connect(function()
     if infiniteJumpEnabled then
-        local _, _, hum = safeCharacter()
-        if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+        pcall(function()
+            local _, _, hum = safeCharacter()
+            if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+        end)
     end
 end))
 
@@ -1302,27 +1319,32 @@ track(LocalPlayer.Idled:Connect(function()
     end
 end))
 
+-- FIX 6: CharacterAdded pcall + daha uzun bekleme
 track(LocalPlayer.CharacterAdded:Connect(function(char)
-    task.wait(0.35)
-    captureOriginal(char)
-    applyWalkSpeed()
-    applyJumpPower()
-    if flyEnabled then startFly() end
-    if noclipEnabled then toggleNoclip(true) end
-    if spinEnabled then toggleSpin(true) end
+    task.wait(0.5)
+    pcall(function()
+        captureOriginal(char)
+        applyWalkSpeed()
+        applyJumpPower()
+        if flyEnabled then task.wait(0.2); startFly() end
+        if noclipEnabled then toggleNoclip(true) end
+        if spinEnabled then toggleSpin(true) end
+    end)
 end))
 
 -- PLAYER HANDLERS
 local function hookPlayer(p)
     if p == LocalPlayer then return end
     track(p.CharacterAdded:Connect(function(char)
-        if espEnabled then
-            if espData[char] then removeESPForModel(char) end
-            task.wait(0.5)
-            createESPForModel(char)
-        end
+        pcall(function()
+            if espEnabled then
+                if espData[char] then removeESPForModel(char) end
+                task.wait(0.5)
+                createESPForModel(char)
+            end
+        end)
     end))
-    if espEnabled and p.Character then createESPForModel(p.Character) end
+    if espEnabled and p.Character then pcall(createESPForModel, p.Character) end
 end
 for _, p in ipairs(Players:GetPlayers()) do hookPlayer(p) end
 track(Players.PlayerAdded:Connect(hookPlayer))
@@ -1349,7 +1371,7 @@ end))
 
 track(RunService.RenderStepped:Connect(function()
     if camFovEnabled and math.abs(Camera.FieldOfView - camFovValue) > 0.1 then
-        Camera.FieldOfView = camFovValue
+        pcall(function() Camera.FieldOfView = camFovValue end)
     end
 end))
 
@@ -1386,70 +1408,71 @@ task.spawn(function()
     end
 end)
 
--- ESP loop (FIX: parent filter + faster + died response)
+-- ESP loop (FIX: pcall wrapped)
 task.spawn(function()
     while true do
         task.wait(espEnabled and 0.03 or 0.4)
         if espEnabled then
-            local _, myPos = safeCharacter()
-            if myPos then
-                local allChars = {}
-                for _, p in ipairs(Players:GetPlayers()) do
-                    if p ~= LocalPlayer and p.Character then
-                        table.insert(allChars, p.Character)
-                    end
-                end
-                if espBotDetect then
-                    refreshBotCache()
-                    for _, model in ipairs(botCache) do
-                        if model and model.Parent then
-                            table.insert(allChars, model)
+            pcall(function()
+                local _, myPos = safeCharacter()
+                if myPos then
+                    local allChars = {}
+                    for _, p in ipairs(Players:GetPlayers()) do
+                        if p ~= LocalPlayer and p.Character then
+                            table.insert(allChars, p.Character)
                         end
                     end
-                end
-
-                local seen = {}
-                for _, char in ipairs(allChars) do
-                    seen[char] = true
-                    if not espData[char] then createESPForModel(char) end
-                    local hum = char:FindFirstChildOfClass("Humanoid")
-                    local head = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildWhichIsA("BasePart")
-                    local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head") or char:FindFirstChildWhichIsA("BasePart")
-                    local data = espData[char]
-                    if data then
-                        local alive = (hum == nil) or (hum.Health > 0)
-                        if alive and head and hrp then
-                            local dist = (hrp.Position - myPos.Position).Magnitude
-                            if dist <= espMaxDistance then
-                                local headScreen, on1 = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
-                                local footScreen, on2 = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 2.5, 0))
-                                if on1 or on2 then
-                                    local height = math.abs(headScreen.Y - footScreen.Y)
-                                    local width = height * 0.6
-                                    data.box.Visible = true
-                                    data.box.Size = UDim2.new(0, width, 0, height)
-                                    data.box.Position = UDim2.new(0, headScreen.X - width/2, 0, headScreen.Y)
-                                    local visible = isPlayerVisible(char)
-                                    local color = visible and espVisibleColor or espHiddenColor
-                                    data.stroke.Color = color
-                                    data.nameLabel.Visible = espShowName
-                                    if espShowName then
-                                        data.nameLabel.Position = UDim2.new(0, headScreen.X - 60, 0, headScreen.Y - 18)
-                                        data.nameLabel.Size = UDim2.new(0, 120, 0, 15)
-                                        data.nameLabel.TextColor3 = color
-                                    end
-                                    data.distLabel.Visible = espShowDistance
-                                    if espShowDistance then
-                                        data.distLabel.Position = UDim2.new(0, headScreen.X - 60, 0, headScreen.Y + height + 2)
-                                        data.distLabel.Size = UDim2.new(0, 120, 0, 15)
-                                        data.distLabel.Text = "["..math.floor(dist).."m]"
-                                        data.distLabel.TextColor3 = color
-                                    end
-                                    data.hpBarBg.Visible = espShowHealth and (hum ~= nil)
-                                    if espShowHealth and hum then
-                                        local hpPct = math.clamp(hum.Health/hum.MaxHealth, 0, 1)
-                                        data.hpFill.Size = UDim2.new(1,0,hpPct,0)
-                                        data.hpFill.BackgroundColor3 = Color3.fromRGB(math.floor(255*(1-hpPct)), math.floor(255*hpPct), 0)
+                    if espBotDetect then
+                        refreshBotCache()
+                        for _, model in ipairs(botCache) do
+                            if model and model.Parent then table.insert(allChars, model) end
+                        end
+                    end
+                    local seen = {}
+                    for _, char in ipairs(allChars) do
+                        seen[char] = true
+                        if not espData[char] then createESPForModel(char) end
+                        local hum = char:FindFirstChildOfClass("Humanoid")
+                        local head = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildWhichIsA("BasePart")
+                        local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head") or char:FindFirstChildWhichIsA("BasePart")
+                        local data = espData[char]
+                        if data then
+                            local alive = (hum == nil) or (hum.Health > 0)
+                            if alive and head and hrp then
+                                local dist = (hrp.Position - myPos.Position).Magnitude
+                                if dist <= espMaxDistance then
+                                    local headScreen, on1 = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
+                                    local footScreen, on2 = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 2.5, 0))
+                                    if on1 or on2 then
+                                        local height = math.abs(headScreen.Y - footScreen.Y)
+                                        local width = height * 0.6
+                                        data.box.Visible = true
+                                        data.box.Size = UDim2.new(0, width, 0, height)
+                                        data.box.Position = UDim2.new(0, headScreen.X - width/2, 0, headScreen.Y)
+                                        local visible = isPlayerVisible(char)
+                                        local color = visible and espVisibleColor or espHiddenColor
+                                        data.stroke.Color = color
+                                        data.nameLabel.Visible = espShowName
+                                        if espShowName then
+                                            data.nameLabel.Position = UDim2.new(0, headScreen.X - 60, 0, headScreen.Y - 18)
+                                            data.nameLabel.Size = UDim2.new(0, 120, 0, 15)
+                                            data.nameLabel.TextColor3 = color
+                                        end
+                                        data.distLabel.Visible = espShowDistance
+                                        if espShowDistance then
+                                            data.distLabel.Position = UDim2.new(0, headScreen.X - 60, 0, headScreen.Y + height + 2)
+                                            data.distLabel.Size = UDim2.new(0, 120, 0, 15)
+                                            data.distLabel.Text = "["..math.floor(dist).."m]"
+                                            data.distLabel.TextColor3 = color
+                                        end
+                                        data.hpBarBg.Visible = espShowHealth and (hum ~= nil)
+                                        if espShowHealth and hum then
+                                            local hpPct = math.clamp(hum.Health/hum.MaxHealth, 0, 1)
+                                            data.hpFill.Size = UDim2.new(1,0,hpPct,0)
+                                            data.hpFill.BackgroundColor3 = Color3.fromRGB(math.floor(255*(1-hpPct)), math.floor(255*hpPct), 0)
+                                        end
+                                    else
+                                        hideESPData(data)
                                     end
                                 else
                                     hideESPData(data)
@@ -1457,80 +1480,77 @@ task.spawn(function()
                             else
                                 hideESPData(data)
                             end
-                        else
-                            hideESPData(data)
                         end
                     end
-                end
-                for model, _ in pairs(espData) do
-                    if not seen[model] then
-                        removeESPForModel(model)
+                    for model, _ in pairs(espData) do
+                        if not seen[model] then removeESPForModel(model) end
                     end
                 end
-            end
+            end)
         end
     end
 end)
 
--- AIMBOT RENDERSTEP
+-- AIMBOT RENDERSTEP (FIX: pcall wrapped)
 local aimWasScriptable = false
 local aimCamOffset = Vector3.zero
 
 RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value + 1, function()
-    if showFOVCircle then
-        FOVFrame.Visible = true
-        local vp = Camera.ViewportSize
-        FOVFrame.Position = UDim2.fromOffset(vp.X / 2, vp.Y / 2)
-        FOVFrame.Size = UDim2.fromOffset(aimbotFOV * 2, aimbotFOV * 2)
-    else
-        FOVFrame.Visible = false
-    end
-
-    local char, hrp, hum = safeCharacter()
-    if not hrp then
-        if aimWasScriptable then
-            aimWasScriptable = false
-            pcall(function() Camera.CameraType = Enum.CameraType.Custom end)
-            if hum then hum.AutoRotate = true end
+    pcall(function()
+        if showFOVCircle then
+            FOVFrame.Visible = true
+            local vp = Camera.ViewportSize
+            FOVFrame.Position = UDim2.fromOffset(vp.X / 2, vp.Y / 2)
+            FOVFrame.Size = UDim2.fromOffset(aimbotFOV * 2, aimbotFOV * 2)
+        else
+            FOVFrame.Visible = false
         end
-        return
-    end
-
-    if aimbotEnabled then
-        aimbotTarget = getAimbotTarget()
-    else
-        aimbotTarget = nil
-    end
-
-    local keyHeld = aimbotEnabled and isAimbotTriggered()
-    local hasTarget = aimbotTarget and aimbotTarget.Parent
-
-    if keyHeld and hasTarget then
-        if not aimWasScriptable then
-            aimWasScriptable = true
-            aimCamOffset = Camera.CFrame.Position - hrp.Position
-            Camera.CameraType = Enum.CameraType.Scriptable
-            if hum then hum.AutoRotate = false end
+        local char, hrp, hum = safeCharacter()
+        if not hrp then
+            if aimWasScriptable then
+                aimWasScriptable = false
+                pcall(function() Camera.CameraType = Enum.CameraType.Custom end)
+                if hum then hum.AutoRotate = true end
+            end
+            return
         end
-        local alpha = 1 / math.max(aimbotSmoothness, 1)
-        local camPos = hrp.Position + aimCamOffset
-        local desiredCF = CFrame.lookAt(camPos, aimbotTarget.Position)
-        Camera.CFrame = Camera.CFrame:Lerp(desiredCF, alpha)
-        local toTarget = aimbotTarget.Position - hrp.Position
-        local flat = Vector3.new(toTarget.X, 0, toTarget.Z)
-        if flat.Magnitude > 0.05 then
-            local rotCF = CFrame.lookAt(hrp.Position, hrp.Position + flat.Unit)
-            hrp.CFrame = hrp.CFrame:Lerp(rotCF, math.min(1, alpha * 2))
+        if aimbotEnabled then
+            aimbotTarget = getAimbotTarget()
+        else
+            aimbotTarget = nil
         end
-    else
-        if aimWasScriptable then
-            aimWasScriptable = false
-            pcall(function() Camera.CameraType = Enum.CameraType.Custom end)
-            if hum then hum.AutoRotate = true end
+        local keyHeld = aimbotEnabled and isAimbotTriggered()
+        local hasTarget = aimbotTarget and aimbotTarget.Parent
+        if keyHeld and hasTarget then
+            if not aimWasScriptable then
+                aimWasScriptable = true
+                aimCamOffset = Camera.CFrame.Position - hrp.Position
+                Camera.CameraType = Enum.CameraType.Scriptable
+                if hum then hum.AutoRotate = false end
+            end
+            local alpha = 1 / math.max(aimbotSmoothness, 1)
+            local camPos = hrp.Position + aimCamOffset
+            local desiredCF = CFrame.lookAt(camPos, aimbotTarget.Position)
+            Camera.CFrame = Camera.CFrame:Lerp(desiredCF, alpha)
+            local toTarget = aimbotTarget.Position - hrp.Position
+            local flat = Vector3.new(toTarget.X, 0, toTarget.Z)
+            if flat.Magnitude > 0.05 then
+                local rotCF = CFrame.lookAt(hrp.Position, hrp.Position + flat.Unit)
+                hrp.CFrame = hrp.CFrame:Lerp(rotCF, math.min(1, alpha * 2))
+            end
+        else
+            if aimWasScriptable then
+                aimWasScriptable = false
+                pcall(function() Camera.CameraType = Enum.CameraType.Custom end)
+                if hum then hum.AutoRotate = true end
+            end
         end
-    end
+    end)
 end)
 
-captureOriginal(LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait())
+-- FIX 7: character'i bekle, sonra capture et
+local startChar = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+task.wait(0.3)
+pcall(captureOriginal, startChar)
 
-print("STRXcahts v34 | fly hybrid + ws enforcer + esp visible fix")
+print("STRXcahts v35 | anti-kick safety installed")
