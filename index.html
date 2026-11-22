@@ -676,7 +676,9 @@ local function createESPForModel(char)
     espData[char] = {box=box, stroke=boxStroke, nameLabel=nameLbl, distLabel=distLbl, hpBarBg=hpBarBg, hpFill=hpFill}
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then
-        track(hum.Died:Connect(function() hideESPData(espData[char]) end))
+        track(hum.Died:Connect(function()
+            removeESPForModel(char)
+        end))
     end
     track(char.AncestryChanged:Connect(function(_, parent)
         if not parent then removeESPForModel(char) end
@@ -714,7 +716,7 @@ local function getAimbotTarget()
     end
     for _, char in ipairs(allChars) do
         local hum = char:FindFirstChildOfClass("Humanoid")
-        local alive = (hum == nil) or (hum.Health > 0)
+        local alive = hum ~= nil and hum.Health > 0
         if alive then
             local targetPart = char:FindFirstChild(aimbotAimPart)
                 or char:FindFirstChild("HumanoidRootPart")
