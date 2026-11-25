@@ -1,4 +1,6 @@
--- STRXcahts v36.1 | 
+-- STRXcahts v36.0 | Part 1/4 : core + fly + spin + noclip
+-- Bu dosyayı eskisinin TAMAMEN yerine koy. Parts 1->2->3->4 sırayla birleştir.
+
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 task.wait(1)
@@ -113,7 +115,7 @@ local BOT_NAME_KEYWORDS = {
     "unit","troop","minion","slime","skeleton","goblin","orc","demon"
 }
 
--- FIX #7: word-boundary match
+-- FIX #7: word-boundary match — "robot"->"bot", "chain"->"ai" gibi false positive'ler elenir
 local function nameHasKeyword(nameLower)
     for _, kw in ipairs(BOT_NAME_KEYWORDS) do
         if nameLower:find("%f[%a]" .. kw .. "%f[%A]") then
@@ -204,6 +206,7 @@ local function safeCharacter()
     return char, hrp, hum
 end
 
+-- Ölü karakter kontrolü (aimbot/ESP ortak)
 local function isCharAlive(char, hum)
     if not char or not char.Parent then return false end
     if hum then
@@ -327,6 +330,8 @@ local function destroyFlyPhysics()
     if flyBG then pcall(function() flyBG:Destroy() end) flyBG = nil end
 end
 
+-- FIX #1: karakter yoksa görsel OFF'a çekilir. isAutoRestart=true ise (respawn sonrası)
+-- görsel ON bırakılır çünkü bir sonraki respawn'da tekrar denenecek.
 local function startFly(isAutoRestart)
     local _, hrp, hum = safeCharacter()
     if not hrp or not hum then
@@ -503,6 +508,7 @@ local function teleportCharacterTo(cf)
     return true
 end
 
+-- FIX #9: tek noktadan raycast — hem mouse hem touch hem look bunu kullanır
 local function teleportToScreenPoint(x, y)
     local _, hrp = safeCharacter()
     if not hrp then return end
@@ -636,6 +642,7 @@ local function cleanup()
     isRunning = false
     _G.STRXcahts = nil
 
+    -- FIX #5: aim aktifse orijinal kamera tipine dön
     if aimWasScriptable then
         aimWasScriptable = false
         pcall(function()
@@ -734,51 +741,22 @@ local FOVStroke = Instance.new("UIStroke", FOVFrame)
 FOVStroke.Color = Color3.fromRGB(0, 255, 100)
 FOVStroke.Thickness = 2
 
--- Watermark (FPS kısmı dinamik boyutlandırma için ayrıldı)
+-- Watermark
 local wmFrame = Instance.new("Frame", WatermarkGui)
-wmFrame.Size = UDim2.new(0, 130, 0, 30) 
-wmFrame.Position = UDim2.new(1, -140, 0, 10)
+wmFrame.Size = UDim2.new(0, 200, 0, 30)
+wmFrame.Position = UDim2.new(1, -210, 0, 10)
 wmFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
 wmFrame.BackgroundTransparency = 0.25
 wmFrame.BorderSizePixel = 0
 addCorner(wmFrame, 8)
 local wmStroke = addStroke(wmFrame, Color3.fromRGB(255, 140, 0), 1, 0)
-
-local wmLayout = Instance.new("UIListLayout", wmFrame)
-wmLayout.FillDirection = Enum.FillDirection.Horizontal
-wmLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-wmLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-wmLayout.Padding = UDim.new(0, 6)
-
-local wmTitle = Instance.new("TextLabel", wmFrame)
-wmTitle.Size = UDim2.new(0, 80, 1, 0)
-wmTitle.BackgroundTransparency = 1
-wmTitle.Text = "STRXCHATS"
-wmTitle.TextColor3 = Color3.new(1,1,1)
-wmTitle.Font = Enum.Font.GothamBold
-wmTitle.TextSize = 12
-
-local wmFPS = Instance.new("TextLabel", wmFrame)
-wmFPS.Size = UDim2.new(0, 40, 1, 0)
-wmFPS.BackgroundTransparency = 1
-wmFPS.Text = "| 60 FPS"
-wmFPS.TextColor3 = Color3.new(1,1,1)
-wmFPS.Font = Enum.Font.GothamBold
-wmFPS.TextSize = 12
-wmFPS.Visible = showFps
-
--- Ayarlar sekmesinden FPS kapatılıp açılınca watermark boyutunu günceller
-local function updateWmSize()
-    if showFps then
-        wmFrame.Size = UDim2.new(0, 135, 0, 30)
-        wmFPS.Visible = true
-    else
-        wmFrame.Size = UDim2.new(0, 90, 0, 30)
-        wmFPS.Visible = false
-    end
-    wmFrame.Position = UDim2.new(1, -wmFrame.Size.X.Offset - 10, 0, 10)
-end
-updateWmSize()
+local wmText = Instance.new("TextLabel", wmFrame)
+wmText.Size = UDim2.new(1, 0, 1, 0)
+wmText.BackgroundTransparency = 1
+wmText.Text = "STRXCHATS  |  60 FPS"
+wmText.TextColor3 = Color3.new(1,1,1)
+wmText.Font = Enum.Font.GothamBold
+wmText.TextSize = 12
 
 -- ============ ESP ============
 local function hideESPData(data)
@@ -845,6 +823,7 @@ local function createESPForModel(char)
     espData[char] = {box=box, stroke=boxStroke, nameLabel=nameLbl, distLabel=distLbl,
                      hpBarBg=hpBarBg, hpFill=hpFill, conns=espConns}
 
+    -- FIX: ölünce / kaldırılınca ESP temizlenir (aimbot target da buradan temizlenir)
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then
         table.insert(espConns, hum.Died:Connect(function()
@@ -871,6 +850,8 @@ end
 local aimRayParams = RaycastParams.new()
 aimRayParams.FilterType = Enum.RaycastFilterType.Exclude
 
+-- FIX #2: Humanoid'suz botlar da hedeflenir (ESP ile tutarlı).
+-- FIX: ölü karakter filtrelenir, aimbot ölüye kilitlenmez.
 local function getAimbotTarget()
     local closest, shortest = nil, math.huge
     local closestHum = nil
@@ -973,7 +954,7 @@ Title.BackgroundTransparency = 0.1
 Title.BorderSizePixel = 0
 Title.ZIndex = 3
 addCorner(Title, 16)
-
+-- alt köşeleri düzleştir
 local titleBottom = Instance.new("Frame", Title)
 titleBottom.Size = UDim2.new(1, 0, 0, 16)
 titleBottom.Position = UDim2.new(0, 0, 1, -16)
@@ -981,6 +962,10 @@ titleBottom.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
 titleBottom.BackgroundTransparency = 0.1
 titleBottom.BorderSizePixel = 0
 titleBottom.ZIndex = 3
+local titleBottomCornerMask = Instance.new("Frame", titleBottom)
+titleBottomCornerMask.Size = UDim2.new(1, 0, 1, 1)
+titleBottomCornerMask.BackgroundTransparency = 1
+titleBottomCornerMask.ZIndex = 3
 
 local titleAccent = Instance.new("Frame", Title)
 titleAccent.Size = UDim2.new(0, 4, 0, 28)
@@ -1006,7 +991,7 @@ versionBadge.Size = UDim2.new(0, 54, 0, 20)
 versionBadge.Position = UDim2.new(0, 148, 0.5, -10)
 versionBadge.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
 versionBadge.BackgroundTransparency = 0.2
-versionBadge.Text = "v36.1"
+versionBadge.Text = "v36.0"
 versionBadge.TextColor3 = Color3.new(1,1,1)
 versionBadge.Font = Enum.Font.GothamBold
 versionBadge.TextSize = 10
@@ -1024,6 +1009,7 @@ fpsLbl.TextSize = 11
 fpsLbl.TextXAlignment = Enum.TextXAlignment.Right
 fpsLbl.ZIndex = 4
 
+-- Kapat butonu
 local closeBtn = Instance.new("TextButton", Title)
 closeBtn.Size = UDim2.new(0, 34, 0, 34)
 closeBtn.Position = UDim2.new(1, -46, 0.5, -17)
@@ -1040,7 +1026,7 @@ closeBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ============ TAB BAR ============
-local tabNames = {"Player","ESP","Aimbot","TP","Ayarlar"}
+local tabNames = {"Player","ESP","Aimbot","TP","Ekstra","Ayarlar"}
 local tabs = {}
 local tabHolder = Instance.new("Frame", MainFrame)
 tabHolder.Size = UDim2.new(1, -30, 0, 40)
@@ -1058,7 +1044,7 @@ tabLay.VerticalAlignment = Enum.VerticalAlignment.Center
 
 for _, name in ipairs(tabNames) do
     local btn = Instance.new("TextButton", tabHolder)
-    btn.Size = UDim2.new(0, 110, 1, -10)
+    btn.Size = UDim2.new(0, 96, 1, -10)
     btn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
     btn.BorderSizePixel = 0
     btn.Text = name
@@ -1092,7 +1078,7 @@ local function makeToggle(parent, text, y, callback, keybindId, syncId)
     f.BorderSizePixel = 0
     f.ZIndex = 2
     addCorner(f, 8)
-    addStroke(f, Color3.fromRGB(45, 45, 60), 1, 0.4)
+    local rowStroke = addStroke(f, Color3.fromRGB(45, 45, 60), 1, 0.4)
 
     local lbl = Instance.new("TextLabel", f)
     lbl.Size = UDim2.new(1, -140, 1, 0)
@@ -1244,7 +1230,7 @@ local function makeSlider(parent, labelText, minV, maxV, default, y, onChanged)
     knob.BorderSizePixel = 0
     knob.ZIndex = 5
     addCorner(knob, 8)
-    addStroke(knob, Color3.fromRGB(255, 140, 0), 2, 0)
+    local knobStroke = addStroke(knob, Color3.fromRGB(255, 140, 0), 2, 0)
 
     local function upd(x)
         local rel = math.clamp((x - barBg.AbsolutePosition.X) / math.max(barBg.AbsoluteSize.X, 1), 0, 1)
@@ -1319,31 +1305,25 @@ local playerPage  = makePage()
 local espPage     = makePage()
 local aimbotPage  = makePage()
 local tpPage      = makePage()
+local extraPage   = makePage()
 local settingsPage= makePage()
 
 -- ============ PLAYER TAB ============
 makeSectionLabel(playerPage, "Hareket", 4)
 makeToggle(playerPage, "Fly (WASD)", 28, function(s) if s then startFly(false) else stopFly() end end, "fly", "fly")
 makeSlider(playerPage, "Fly Hizi", 1, 500, flySpeed, 70, function(v) flySpeed = v end)
-makeToggle(playerPage, "WalkSpeed Override", 134, function(s) walkSpeedEnabled = s; applyWalkSpeed() end, "walkSpeed")
-makeSlider(playerPage, "WalkSpeed", 1, 500, walkSpeedValue, 176, function(v) walkSpeedValue = v; applyWalkSpeed() end)
-makeToggle(playerPage, "JumpPower Override", 240, function(s) jumpPowerEnabled = s; applyJumpPower() end)
-makeSlider(playerPage, "JumpPower", 10, 500, jumpPowerValue, 282, function(v) jumpPowerValue = v; if jumpPowerEnabled then applyJumpPower() end end)
-makeToggle(playerPage, "Noclip", 346, function(s) toggleNoclip(s) end, "noclip")
-makeToggle(playerPage, "Sonsuz Ziplama", 388, function(s) infiniteJumpEnabled = s end, "infJump")
-makeToggle(playerPage, "Spin", 430, function(s) toggleSpin(s) end, "spin")
-makeSlider(playerPage, "Spin Hizi", 1, 200, spinSpeed, 472, function(v) spinSpeed = v; if spinAV then spinAV.AngularVelocity = Vector3.new(0,v,0) end end)
-
-makeSectionLabel(playerPage, "Kamera & Ekstra", 536)
-makeToggle(playerPage, "Kamera FOV Ac/Kapat", 560, function(s)
-    camFovEnabled = s
-    if not s then pcall(function() Camera.FieldOfView = 70 end) end
-end)
-makeSlider(playerPage, "Kamera FOV Degeri", 50, 120, camFovValue, 602, function(v)
-    camFovValue = v
-    if camFovEnabled then pcall(function() Camera.FieldOfView = v end) end
-end)
-makeToggle(playerPage, "Anti-AFK", 666, function(s) antiAfkEnabled = s end)
+makeToggle(playerPage, "WalkSpeed Override", 132, function(s) walkSpeedEnabled = s; applyWalkSpeed() end, "walkSpeed")
+makeSlider(playerPage, "WalkSpeed", 1, 500, walkSpeedValue, 174, function(v) walkSpeedValue = v; applyWalkSpeed() end)
+makeToggle(playerPage, "JumpPower Override", 236, function(s) jumpPowerEnabled = s; applyJumpPower() end)
+makeSlider(playerPage, "JumpPower", 10, 500, jumpPowerValue, 278, function(v) jumpPowerValue = v; if jumpPowerEnabled then applyJumpPower() end end)
+makeToggle(playerPage, "Noclip", 340, function(s) toggleNoclip(s) end, "noclip")
+makeToggle(playerPage, "Sonsuz Ziplama", 382, function(s) infiniteJumpEnabled = s end, "infJump")
+makeToggle(playerPage, "Spin", 424, function(s) toggleSpin(s) end, "spin")
+makeSlider(playerPage, "Spin Hizi", 1, 200, spinSpeed, 466, function(v) spinSpeed = v; if spinAV then spinAV.AngularVelocity = Vector3.new(0,v,0) end end)
+makeSectionLabel(playerPage, "Isinlanma", 530)
+makeButton(playerPage, "Mouse'a Isinlan", 8, 554, 155, 36, Color3.fromRGB(60,140,255), teleportToMouse)
+makeButton(playerPage, "Geri Don", 173, 554, 155, 36, Color3.fromRGB(200,100,60), goBack)
+makeToggle(playerPage, "Anti-AFK", 600, function(s) antiAfkEnabled = s end)
 
 -- ============ ESP TAB ============
 makeSectionLabel(espPage, "Gorunum", 4)
@@ -1367,8 +1347,8 @@ makeToggle(espPage, "Isim Goster", 70, function(s) espShowName = s end)
 makeToggle(espPage, "Can Goster", 112, function(s) espShowHealth = s end)
 makeToggle(espPage, "Mesafe Goster", 154, function(s) espShowDistance = s end)
 makeSlider(espPage, "Max Mesafe", 50, 3000, espMaxDistance, 196, function(v) espMaxDistance = v end)
-makeSectionLabel(espPage, "Bot Tespiti", 260)
-makeToggle(espPage, "Botlari Algila", 284, function(s)
+makeSectionLabel(espPage, "Bot Tespiti", 258)
+makeToggle(espPage, "Botlari Algila", 282, function(s)
     espBotDetect = s
     if not s then
         for model, _ in pairs(espData) do
@@ -1383,20 +1363,20 @@ makeToggle(espPage, "Botlari Algila", 284, function(s)
         end
     end
 end)
-makeToggle(espPage, "Agresif Bot Tarama", 326, function(s) botScanAggressive = s end)
-makeSlider(espPage, "Tarama Derinligi", 2, 6, botScanDepth, 368, function(v) botScanDepth = v end)
+makeToggle(espPage, "Agresif Bot Tarama", 324, function(s) botScanAggressive = s end)
+makeSlider(espPage, "Tarama Derinligi", 2, 6, botScanDepth, 366, function(v) botScanDepth = v end)
 
 -- ============ AIMBOT TAB ============
 makeSectionLabel(aimbotPage, "Aimbot", 4)
 makeToggle(aimbotPage, "Aimbot Ac/Kapat", 28, function(s) aimbotEnabled = s; if not s then aimbotTarget = nil end end, "aimbot")
 makeSlider(aimbotPage, "FOV (Cember Boyutu)", 20, 400, aimbotFOV, 70, function(v) aimbotFOV = v end)
-makeSlider(aimbotPage, "Yumusaklik", 1, 20, aimbotSmoothness, 134, function(v) aimbotSmoothness = v end)
-makeToggle(aimbotPage, "Duvar Kontrolu", 198, function(s) aimbotWallCheck = s end)
-makeToggle(aimbotPage, "Botlari Algila (Aimbot)", 240, function(s) aimbotBotDetect = s end)
+makeSlider(aimbotPage, "Yumusaklik", 1, 20, aimbotSmoothness, 132, function(v) aimbotSmoothness = v end)
+makeToggle(aimbotPage, "Duvar Kontrolu", 194, function(s) aimbotWallCheck = s end)
+makeToggle(aimbotPage, "Botlari Algila (Aimbot)", 236, function(s) aimbotBotDetect = s end)
 
 local aimKeyRow = Instance.new("Frame", aimbotPage)
 aimKeyRow.Size = UDim2.new(0, 320, 0, 38)
-aimKeyRow.Position = UDim2.new(0, 8, 0, 282)
+aimKeyRow.Position = UDim2.new(0, 8, 0, 278)
 aimKeyRow.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
 aimKeyRow.BorderSizePixel = 0
 aimKeyRow.ZIndex = 2
@@ -1430,10 +1410,10 @@ aimKeyBtn.MouseButton1Click:Connect(function()
     aimKeyBtn.Text = "Bekleniyor..."
 end)
 
-makeSectionLabel(aimbotPage, "Hitbox", 336)
+makeSectionLabel(aimbotPage, "Hitbox", 330)
 local hbRow = Instance.new("Frame", aimbotPage)
 hbRow.Size = UDim2.new(0, 320, 0, 38)
-hbRow.Position = UDim2.new(0, 8, 0, 360)
+hbRow.Position = UDim2.new(0, 8, 0, 354)
 hbRow.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
 hbRow.BorderSizePixel = 0
 hbRow.ZIndex = 2
@@ -1461,7 +1441,7 @@ hbBtn.TextSize = 11
 hbBtn.AutoButtonColor = false
 hbBtn.ZIndex = 3
 addCorner(hbBtn, 6)
-addStroke(hbBtn, Color3.new(1,1,1), 1, 0.8)
+local hbBtnStroke = addStroke(hbBtn, Color3.new(1,1,1), 1, 0.8)
 hbBtn.MouseButton1Click:Connect(function()
     hitboxEnabled = not hitboxEnabled
     hbBtn.Text = hitboxEnabled and "ON" or "OFF"
@@ -1470,12 +1450,12 @@ hbBtn.MouseButton1Click:Connect(function()
     }):Play()
     if hitboxEnabled then task.spawn(hitboxLoop) end
 end)
-makeSlider(aimbotPage, "Hitbox Boyutu", 2, 15, hitboxSize, 402, function(v) hitboxSize = v end)
-makeToggle(aimbotPage, "Hitbox Botlari Algila", 466, function(s) hitboxBotDetect = s end)
+makeSlider(aimbotPage, "Hitbox Boyutu", 2, 15, hitboxSize, 396, function(v) hitboxSize = v end)
+makeToggle(aimbotPage, "Hitbox Botlari Algila", 458, function(s) hitboxBotDetect = s end)
 
 local showFovRow = Instance.new("Frame", aimbotPage)
 showFovRow.Size = UDim2.new(0, 320, 0, 38)
-showFovRow.Position = UDim2.new(0, 8, 0, 508)
+showFovRow.Position = UDim2.new(0, 8, 0, 500)
 showFovRow.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
 showFovRow.BorderSizePixel = 0
 showFovRow.ZIndex = 2
@@ -1522,14 +1502,13 @@ lookTpKbBtn.MouseButton1Click:Connect(function()
     lookTpKbBtn.Text = "..."
 end)
 makeButton(tpPage, "Geri Don (Son Isinlanmadan)", 8, 120, 320, 38, Color3.fromRGB(200,100,60), goBack)
-makeToggle(tpPage, "Tikla-Isinlan (Mouse/Touch)", 170, function(s) clickTpEnabled = s end, "clickTp")
-makeToggle(tpPage, "Botlari Algila (TP Aura)", 212, function(s) tpAuraBotDetect = s end)
+makeToggle(tpPage, "Botlari Algila (TP Aura)", 170, function(s) tpAuraBotDetect = s end)
 local tpInfo = Instance.new("TextLabel", tpPage)
 tpInfo.Size = UDim2.new(0, 320, 0, 70)
-tpInfo.Position = UDim2.new(0, 8, 0, 256)
+tpInfo.Position = UDim2.new(0, 8, 0, 214)
 tpInfo.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
 tpInfo.BackgroundTransparency = 0.3
-tpInfo.Text = "Tus atamak icin 'Ata' butonuna tikla,\nsonra istedigin tusa bas. Her basisda tetiklenir.\nTikla-Isinlan: Menu kapaliyken ekrana tiklayarak isinlan."
+tpInfo.Text = "Tus atamak icin 'Ata' butonuna tikla,\nsonra istedigin tusa bas. Her basisda tetiklenir."
 tpInfo.TextColor3 = Color3.fromRGB(190, 190, 200)
 tpInfo.Font = Enum.Font.Gotham
 tpInfo.TextSize = 11
@@ -1537,13 +1516,22 @@ tpInfo.TextWrapped = true
 tpInfo.ZIndex = 2
 addCorner(tpInfo, 8)
 
--- ============ AYARLAR TAB ============
-makeSectionLabel(settingsPage, "Sistem", 4)
-makeToggle(settingsPage, "RGB Renk Modu", 28, function(s) rgbEnabled = s end)
-makeToggle(settingsPage, "FPS Sayaci (Sag Ust)", 70, function(s) 
-    showFps = s 
-    updateWmSize() -- Watermark boyutunu anında günceller
+-- ============ EKSTRA TAB ============
+makeSectionLabel(extraPage, "Ekstra", 4)
+makeToggle(extraPage, "Tikla-Isinlan (Mouse/Touch)", 28, function(s) clickTpEnabled = s end, "clickTp")
+makeToggle(extraPage, "Kamera FOV Ac/Kapat", 70, function(s)
+    camFovEnabled = s
+    if not s then pcall(function() Camera.FieldOfView = 70 end) end
 end)
+makeSlider(extraPage, "Kamera FOV Degeri", 50, 120, camFovValue, 112, function(v)
+    camFovValue = v
+    if camFovEnabled then pcall(function() Camera.FieldOfView = v end) end
+end)
+
+-- ============ AYARLAR TAB ============
+makeSectionLabel(settingsPage, "Gorunum", 4)
+makeToggle(settingsPage, "RGB Renk Modu", 28, function(s) rgbEnabled = s end)
+makeToggle(settingsPage, "FPS Sayaci", 70, function(s) showFps = s end)
 local menuKeyRow = makeKeybindAction(settingsPage, "Menu Ac/Kapat Tusu", 112)
 menuKeyRow.Text = keybinds.menu.key and keybinds.menu.key.Name or "Insert"
 menuKeyRow.MouseButton1Click:Connect(function()
@@ -1557,15 +1545,15 @@ local creditLbl = Instance.new("TextLabel", settingsPage)
 creditLbl.Size = UDim2.new(0, 320, 0, 40)
 creditLbl.Position = UDim2.new(0, 8, 0, 214)
 creditLbl.BackgroundTransparency = 1
-creditLbl.Text = "STRXCHATS v36.1\nInsert = menu, RGB = dinamik"
+creditLbl.Text = "STRXCHATS v36.0\nInsert = menu, RGB = dinamik"
 creditLbl.TextColor3 = Color3.fromRGB(140, 140, 150)
 creditLbl.Font = Enum.Font.Gotham
 creditLbl.TextSize = 11
 creditLbl.TextWrapped = true
 creditLbl.ZIndex = 2
 
--- ============ PAGE SWITCH ============
-local pages = {Player=playerPage, ESP=espPage, Aimbot=aimbotPage, TP=tpPage, Ayarlar=settingsPage}
+-- PAGE SWITCH
+local pages = {Player=playerPage, ESP=espPage, Aimbot=aimbotPage, TP=tpPage, Ekstra=extraPage, Ayarlar=settingsPage}
 local activeTab = "Player"
 local function showPage(name)
     activeTab = name
@@ -1575,12 +1563,10 @@ local function showPage(name)
             TweenService:Create(t, TweenInfo.new(0.15), {
                 BackgroundColor3 = rgbEnabled and getRGBColor() or Color3.fromRGB(255, 140, 0)
             }):Play()
-            t.TextColor3 = Color3.new(1,1,1)
         else
             TweenService:Create(t, TweenInfo.new(0.15), {
                 BackgroundColor3 = Color3.fromRGB(35, 35, 45)
             }):Play()
-            t.TextColor3 = Color3.fromRGB(200, 200, 210)
         end
     end
 end
@@ -1588,7 +1574,8 @@ for name, btn in pairs(tabs) do
     btn.MouseButton1Click:Connect(function() showPage(name) end)
 end
 showPage("Player")
--- ============ GLOBAL INPUT (Slider) ============
+
+-- ============ GLOBAL INPUT (slider) ============
 track(UserInputService.InputChanged:Connect(function(i)
     if activeSlider and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
         pcall(activeSlider, i.Position.X)
@@ -1601,6 +1588,7 @@ track(UserInputService.InputEnded:Connect(function(i)
 end))
 
 -- ============ INPUT BINDING ============
+-- FIX #6: mouse basışı ile bind listener'dan çıkılır (state artık takılı kalmaz)
 track(UserInputService.InputBegan:Connect(function(input, gp)
     if listeningForBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
@@ -1614,7 +1602,7 @@ track(UserInputService.InputBegan:Connect(function(input, gp)
                 if keybindButtons[id] then keybindButtons[id].Text = input.KeyCode.Name end
             end
         else
-            -- Mouse veya Touch basılırsa iptal et ve butonları eski haline getir
+            -- klavye dışı: dinlemeyi iptal et, state temizle
             listeningForBind = nil
             if keybindButtons and next(keybindButtons) then
                 for id, kb in pairs(keybindButtons) do
@@ -1667,7 +1655,7 @@ track(UserInputService.InputBegan:Connect(function(input, gp)
     if tpAuraKeybind and input.KeyCode == tpAuraKeybind then randomPlayerTp(); return end
     if lookTpKeybind and input.KeyCode == lookTpKeybind then lookTp(); return end
 
-    -- Tıkla-Işınlan (Mouse & Touch desteği)
+    -- FIX #9: clickTp artık Touch'ı da destekler
     if clickTpEnabled and not ScreenGui.Enabled then
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             teleportToMouse()
@@ -1679,13 +1667,13 @@ track(UserInputService.InputBegan:Connect(function(input, gp)
         end
     end
 
-    -- Menü aç/kapat
+    -- Menü toggle
     if keybinds.menu.key and input.KeyCode == keybinds.menu.key then
         ScreenGui.Enabled = not ScreenGui.Enabled
         return
     end
 
-    -- Özellik keybind'leri
+    -- Feature keybind toggle
     for id, kb in pairs(keybinds) do
         if id ~= "menu" and kb.key and kb.key == input.KeyCode and kb.callback then
             kb.callback()
@@ -1724,7 +1712,7 @@ track(LocalPlayer.CharacterAdded:Connect(function(char)
         applyJumpPower()
         if flyEnabled then
             task.wait(0.2)
-            startFly(true) -- Fly'ı respawn'da görseli bozmadan tekrar başlat
+            startFly(true) -- auto-restart: görsel OFF'a çekilmesin
         end
         if noclipEnabled then toggleNoclip(true) end
         if spinEnabled then toggleSpin(true) end
@@ -1732,6 +1720,7 @@ track(LocalPlayer.CharacterAdded:Connect(function(char)
 end))
 
 -- ============ PLAYER HOOKING ============
+-- FIX #10: PlayerRemoving'de hem ESP hem CharacterAdded bağlantısı temizlenir
 local function hookPlayer(p)
     if p == LocalPlayer then return end
     if not playerConns[p] then playerConns[p] = {} end
@@ -1774,7 +1763,7 @@ track(RunService.RenderStepped:Connect(function()
         fpsTimer = tick()
         if showFps then
             fpsLbl.Text = cur.." FPS"
-            wmFPS.Text = "| "..cur.." FPS"
+            wmText.Text = "STRXCHATS  |  "..cur.." FPS"
         end
     end
 end))
@@ -1787,7 +1776,7 @@ track(RunService.RenderStepped:Connect(function()
     end
 end))
 
--- ============ RGB LOOP ============
+-- ============ RGB LOOP (FIX #8: isRunning guard) ============
 task.spawn(function()
     while isRunning do
         task.wait(0.1)
@@ -1807,8 +1796,7 @@ task.spawn(function()
                 titleAccent.BackgroundColor3 = col
                 bgLogo.TextColor3 = col
                 bgLogo.TextTransparency = 0.85
-                wmTitle.TextColor3 = col
-                wmFPS.TextColor3 = col
+                wmText.TextColor3 = col
                 wmStroke.Color = col
                 FOVStroke.Color = col
                 mainStroke.Color = col
@@ -1818,8 +1806,7 @@ task.spawn(function()
                 titleAccent.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
                 bgLogo.TextColor3 = Color3.new(1,1,1)
                 bgLogo.TextTransparency = 0.9
-                wmTitle.TextColor3 = Color3.new(1,1,1)
-                wmFPS.TextColor3 = Color3.new(1,1,1)
+                wmText.TextColor3 = Color3.new(1,1,1)
                 wmStroke.Color = Color3.fromRGB(255, 140, 0)
                 FOVStroke.Color = Color3.fromRGB(0, 255, 100)
                 mainStroke.Color = Color3.fromRGB(255, 140, 0)
@@ -1867,6 +1854,7 @@ task.spawn(function()
                             if dist <= espMaxDistance then
                                 local headScreen, on1 = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
                                 local footScreen, on2 = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 2.5, 0))
+                                -- FIX #4: ikisi de on-screen olmalı; aksi halde kutu glitch olur
                                 if on1 and on2 then
                                     local height = math.abs(headScreen.Y - footScreen.Y)
                                     if height > 0 and height < vp.Y then
@@ -1907,6 +1895,7 @@ task.spawn(function()
                             end
                         else
                             hideESPData(data)
+                            -- ölü player karakteri için data'yı temizle
                             if hum and hum.Health <= 0 then removeESPForModel(char) end
                         end
                     end
@@ -1920,6 +1909,7 @@ task.spawn(function()
 end)
 
 -- ============ AIMBOT RENDERSTEP ============
+-- FIX #5: bırakırken CameraType.Custom zorlanmıyor — orijinal tip restore ediliyor
 RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value + 1, function()
     if not isRunning then return end
     pcall(function()
@@ -1956,7 +1946,7 @@ RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value
 
         local keyHeld = aimbotEnabled and isAimbotTriggered()
         local hasTarget = aimbotTarget and aimbotTarget.Parent
-        
+        -- ölü hedefe kilitlenmeyi engelle
         if hasTarget and aimbotTargetHum and not isCharAlive(aimbotTarget.Parent, aimbotTargetHum) then
             hasTarget = false
             aimbotTarget = nil
@@ -2005,4 +1995,5 @@ if isRunning then
     pcall(captureOriginal, startChar)
 end
 
-print("STRXcahts v36.1 | )
+print("STRXcahts v36.0 | tum fixler entegre edildi")
+                                                
