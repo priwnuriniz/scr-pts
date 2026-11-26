@@ -1,4 +1,4 @@
--- STRXcahts v36.2 | Part 1/4 : core + fly + spin + noclip
+-- STRXcahts v37.0 | Part 1/4 : core + bypass + movement
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
 
 task.wait(1)
@@ -9,11 +9,11 @@ local UserInputService  = game:GetService("UserInputService")
 local TweenService      = game:GetService("TweenService")
 local GuiService        = game:GetService("GuiService")
 local VirtualUser       = game:GetService("VirtualUser")
+local SoundService      = game:GetService("SoundService")
 local LocalPlayer       = Players.LocalPlayer
 local Camera            = workspace.CurrentCamera
 
 local isRunning = true
-
 local connections = {}
 local function track(c) table.insert(connections, c); return c end
 
@@ -42,6 +42,9 @@ local guiParent = getGuiParent()
 -- ============ STATE ============
 local flyEnabled, flySpeed = false, 50
 local walkSpeedEnabled, walkSpeedValue = false, 30
+local speedSpoofEnabled = false
+local bypassEnabled = false
+local antiFlingEnabled = false
 local jumpPowerEnabled, jumpPowerValue = false, 50
 local spinEnabled, spinSpeed = false, 20
 local noclipEnabled = false
@@ -51,6 +54,7 @@ local clickTpEnabled = false
 local rgbEnabled = true
 local rgbHue = 0
 local showFps = true
+local showPing = true
 local hitboxEnabled, hitboxSize = false, 5
 local hitboxBotDetect = false
 local camFovEnabled, camFovValue = false, 70
@@ -60,7 +64,11 @@ local espBotDetect = false
 local espVisibleColor = Color3.fromRGB(0, 255, 100)
 local espHiddenColor  = Color3.fromRGB(255, 60, 60)
 local espMaxDistance  = 1000
+local espChamsEnabled = false
+local espChamsColor = Color3.fromRGB(255, 0, 0)
 local espData = {}
+
+-- Aimbot State
 local aimbotEnabled = false
 local aimbotKey = Enum.UserInputType.MouseButton2
 local aimbotFOV = 150
@@ -70,10 +78,26 @@ local aimbotAimPart = "Head"
 local aimbotTarget = nil
 local aimbotTargetHum = nil
 local aimbotBotDetect = false
-local showFOVCircle = true
+local showFOVCircle = false -- FOV ilk açılışta kapalı (İstek üzerine)
+local aimPrediction = false
+local aimPredictionMultiplier = 1.5
+local aimTeamCheck = false
+local aimFriendCheck = false
+local orbitEnabled = false
+local orbitSpeed = 5
+local orbitRadius = 5
+local orbitAngle = 0
+
+-- Crosshair
+local crosshairEnabled = false
+local crosshairColor = Color3.fromRGB(0, 255, 0)
+local crosshairSize = 10
+local crosshairThickness = 2
+
+-- Utility
 local savedPosition = nil
 local flyBV, flyBG, flyConn
-local noclipConn
+local noclipConn, antiFlingConn
 local spinAV
 local toggleSync = {}
 local originalStats  = setmetatable({}, {__mode = "k"})
@@ -83,6 +107,8 @@ local hitboxLoopActive = false
 local botScanAggressive = false
 local botScanDepth = 3
 local activeSlider = nil
+
+-- Input & UI State
 local listeningForBind = nil
 local listeningForAimTrigger = false
 local listeningForTpAuraKey = false
@@ -97,28 +123,74 @@ local aimCamOffset = Vector3.zero
 local keybindButtons = {}
 local playerConns = {}
 
+-- Utility State
+local spamEnabled = false
+local spamText = "STRXCHATS ON TOP!"
+local spamDelay = 1
+local soundIdInput = ""
+local soundPlaying = false
+
 local keybinds = {
     fly = {}, aimbot = {}, esp = {}, noclip = {}, infJump = {},
-    spin = {}, walkSpeed = {}, clickTp = {},
+    spin = {}, walkSpeed = {}, clickTp = {}, orbit = {},
     menu = {key = Enum.KeyCode.Insert, callback = nil},
 }
+
+-- ============ METATABLE BYPASS ============
+local mtHookSuccess = false
+local oldNamecall
+local oldIndex
+
+local function enableBypass()
+    if bypassEnabled then return end
+    bypassEnabled = true
+    if not getrawmetatable or not setreadonly then return end
+    local mt = getrawmetatable(game)
+    if not mt then return end
+    setreadonly(mt, false)
+
+    oldIndex = mt.__index
+    mt.__index = newcclosure(function(self, key)
+        if bypassEnabled and not checkcaller() then
+            if self:IsA("Humanoid") and key == "WalkSpeed" then
+                return 16 -- Anti-cheat'e normal hız göster
+            end
+            if self:IsA("Humanoid") and key == "JumpPower" then
+                return 50
+            end
+        end
+        return oldIndex(self, key)
+    end)
+
+    setreadonly(mt, true)
+    mtHookSuccess = true
+end
+
+local function disableBypass()
+    bypassEnabled = false
+    if mtHookSuccess and getrawmetatable and setreadonly then
+        pcall(function()
+            local mt = getrawmetatable(game)
+            setreadonly(mt, false)
+            mt.__index = oldIndex
+            setreadonly(mt, true)
+        end)
+        mtHookSuccess = false
+    end
+end
 
 -- ============ BOT CACHE ============
 local botCache = {}
 local botCacheTime = 0
-
 local BOT_NAME_KEYWORDS = {
     "bot","npc","mob","enemy","zombie","monster","dummy","target",
     "boss","creature","hostile","ai","trainer","guard","soldier",
     "unit","troop","minion","slime","skeleton","goblin","orc","demon"
 }
 
--- FIX #7: word-boundary match
 local function nameHasKeyword(nameLower)
     for _, kw in ipairs(BOT_NAME_KEYWORDS) do
-        if nameLower:find("%f[%a]" .. kw .. "%f[%A]") then
-            return true
-        end
+        if nameLower:find("%f[%a]" .. kw .. "%f[%A]") then return true end
     end
     return false
 end
@@ -142,9 +214,7 @@ local function isBotCharacter(model)
     if hum and hum.Health <= 0 then return false end
     local hrp  = model:FindFirstChild("HumanoidRootPart")
     local head = model:FindFirstChild("Head")
-    local torso = model:FindFirstChild("Torso")
-        or model:FindFirstChild("UpperTorso")
-        or model:FindFirstChild("LowerTorso")
+    local torso = model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso") or model:FindFirstChild("LowerTorso")
     local anyPart = model:FindFirstChildWhichIsA("BasePart")
     if hrp then return true end
     if head and torso then return true end
@@ -177,9 +247,7 @@ local function refreshBotCache()
     if tick() - botCacheTime < interval then return end
     botCacheTime = tick()
     local newCache = {}
-    local ok = pcall(function()
-        scanInstanceRecursive(workspace, newCache, 0, botScanDepth)
-    end)
+    local ok = pcall(function() scanInstanceRecursive(workspace, newCache, 0, botScanDepth) end)
     if ok then botCache = newCache end
 end
 
@@ -247,6 +315,28 @@ track(RunService.Stepped:Connect(function()
     end)
 end))
 
+-- ============ ANTI-FLING ============
+local function toggleAntiFling(state)
+    antiFlingEnabled = state
+    if antiFlingConn then pcall(function() antiFlingConn:Disconnect() end) antiFlingConn = nil end
+    if antiFlingEnabled then
+        antiFlingConn = RunService.Heartbeat:Connect(function()
+            if not isRunning then return end
+            pcall(function()
+                local _, hrp = safeCharacter()
+                if hrp then
+                    if hrp.AssemblyLinearVelocity.Magnitude > 100 then
+                        hrp.AssemblyLinearVelocity = Vector3.zero
+                    end
+                    if hrp.AssemblyAngularVelocity.Magnitude > 50 then
+                        hrp.AssemblyAngularVelocity = Vector3.zero
+                    end
+                end
+            end)
+        end)
+    end
+end
+
 local function applyJumpPower()
     local char, _, hum = safeCharacter()
     if not hum then return end
@@ -273,48 +363,37 @@ track(RunService.Stepped:Connect(function()
         local _, _, hum = safeCharacter()
         if hum then
             if not hum.UseJumpPower then hum.UseJumpPower = true end
-            if math.abs(hum.JumpPower - jumpPowerValue) > 0.5 then
-                hum.JumpPower = jumpPowerValue
-            end
+            if math.abs(hum.JumpPower - jumpPowerValue) > 0.5 then hum.JumpPower = jumpPowerValue end
         end
     end)
 end))
 
 local function isAimbotTriggered()
     if typeof(aimbotKey) == "EnumItem" then
-        if aimbotKey.EnumType == Enum.KeyCode then
-            return UserInputService:IsKeyDown(aimbotKey)
-        elseif aimbotKey.EnumType == Enum.UserInputType then
-            return UserInputService:IsMouseButtonPressed(aimbotKey)
-        end
+        if aimbotKey.EnumType == Enum.KeyCode then return UserInputService:IsKeyDown(aimbotKey)
+        elseif aimbotKey.EnumType == Enum.UserInputType then return UserInputService:IsMouseButtonPressed(aimbotKey) end
     end
     return false
 end
 
 local visibilityCache = setmetatable({}, {__mode = "k"})
-
 local function isPlayerVisible(targetChar)
     local now = tick()
     local cached = visibilityCache[targetChar]
-    if cached and now - cached.time < 0.12 then
-        return cached.visible
-    end
+    if cached and now - cached.time < 0.12 then return cached.visible end
     local myChar = LocalPlayer.Character
     if not myChar then return false end
     local myHrp = myChar:FindFirstChild("HumanoidRootPart")
     if not myHrp then return false end
-    local targetHrp = targetChar:FindFirstChild("HumanoidRootPart")
-        or targetChar:FindFirstChild("Head")
-        or targetChar:FindFirstChildWhichIsA("BasePart")
+    local targetHrp = targetChar:FindFirstChild("HumanoidRootPart") or targetChar:FindFirstChild("Head") or targetChar:FindFirstChildWhichIsA("BasePart")
     if not targetHrp then return false end
     local origin = myHrp.Position + Vector3.new(0, 1.5, 0)
     local targetPos = targetHrp.Position + Vector3.new(0, 1, 0)
-    local dir = targetPos - origin
     local p = RaycastParams.new()
     p.FilterType = Enum.RaycastFilterType.Exclude
     p.FilterDescendantsInstances = {myChar, targetChar}
     p.IgnoreWater = true
-    local ok, r = pcall(function() return workspace:Raycast(origin, dir, p) end)
+    local ok, r = pcall(function() return workspace:Raycast(origin, targetPos - origin, p) end)
     local visible = ok and (r == nil)
     visibilityCache[targetChar] = {time = now, visible = visible}
     return visible
@@ -338,10 +417,7 @@ local function startFly(isAutoRestart)
     end
     flyEnabled = true
     destroyFlyPhysics()
-    pcall(function()
-        hum.PlatformStand = true
-        hum.AutoRotate = false
-    end)
+    pcall(function() hum.PlatformStand = true; hum.AutoRotate = false end)
     pcall(function()
         flyBV = Instance.new("BodyVelocity")
         flyBV.Name = "STRX_FlyBV"
@@ -376,27 +452,20 @@ local function startFly(isAutoRestart)
             local targetVel = dir.Magnitude > 0 and (dir.Unit * flySpeed) or Vector3.zero
             if not cframeMode then
                 if not flyBV or not flyBV.Parent then
-                    flyBV = Instance.new("BodyVelocity")
-                    flyBV.Name = "STRX_FlyBV"
+                    flyBV = Instance.new("BodyVelocity", r)
                     flyBV.MaxForce = Vector3.new(1e6, 1e6, 1e6)
                     flyBV.Velocity = Vector3.zero
-                    flyBV.Parent = r
                 end
                 if not flyBG or not flyBG.Parent then
-                    flyBG = Instance.new("BodyGyro")
-                    flyBG.Name = "STRX_FlyBG"
+                    flyBG = Instance.new("BodyGyro", r)
                     flyBG.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
                     flyBG.P = 10000
                     flyBG.D = 500
-                    flyBG.Parent = r
                 end
                 flyBV.Velocity = flyBV.Velocity:Lerp(targetVel, math.min(1, dt * 10))
                 if flyBG then
-                    local look = camCF.LookVector
-                    local flat = Vector3.new(look.X, 0, look.Z)
-                    if flat.Magnitude > 0.01 then
-                        flyBG.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit)
-                    end
+                    local flat = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z)
+                    if flat.Magnitude > 0.01 then flyBG.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit) end
                 end
                 if targetVel.Magnitude > 0 then
                     if (r.Position - lastPos).Magnitude < 0.02 then
@@ -406,18 +475,11 @@ local function startFly(isAutoRestart)
                             if flyBV then flyBV:Destroy() flyBV = nil end
                             if flyBG then flyBG:Destroy() flyBG = nil end
                         end
-                    else
-                        stuckFrames = 0
-                    end
+                    else stuckFrames = 0 end
                 end
             else
                 r.AssemblyLinearVelocity = targetVel
                 r.CFrame = r.CFrame + targetVel * dt
-                local look = camCF.LookVector
-                local flat = Vector3.new(look.X, 0, look.Z)
-                if flat.Magnitude > 0.01 then
-                    r.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit)
-                end
             end
             lastPos = r.Position
         end)
@@ -429,10 +491,7 @@ local function stopFly()
     destroyFlyPhysics()
     pcall(function()
         local _, _, hum = safeCharacter()
-        if hum then
-            hum.PlatformStand = false
-            hum.AutoRotate = true
-        end
+        if hum then hum.PlatformStand = false; hum.AutoRotate = true end
     end)
     if toggleSync.fly then toggleSync.fly.setVisual(false) end
 end
@@ -447,14 +506,12 @@ local function toggleSpin(state)
         local oldAtt = hrp:FindFirstChild("SpinAtt")
         if oldAtt then oldAtt:Destroy() end
         if spinEnabled then
-            local att = Instance.new("Attachment")
+            local att = Instance.new("Attachment", hrp)
             att.Name = "SpinAtt"
-            att.Parent = hrp
-            spinAV = Instance.new("AngularVelocity")
+            spinAV = Instance.new("AngularVelocity", hrp)
             spinAV.Attachment0 = att
             spinAV.MaxTorque = math.huge
             spinAV.AngularVelocity = Vector3.new(0, spinSpeed, 0)
-            spinAV.Parent = hrp
         end
     end)
 end
@@ -465,17 +522,14 @@ local function toggleNoclip(state)
     if noclipEnabled then
         local last = 0
         noclipConn = RunService.Stepped:Connect(function()
-            if not isRunning then return end
-            if tick() - last < 0.15 then return end
+            if not isRunning or tick() - last < 0.15 then return end
             last = tick()
             pcall(function()
                 local char = LocalPlayer.Character
                 if not char then return end
                 for _, v in ipairs(char:GetDescendants()) do
                     if v:IsA("BasePart") then
-                        if originalCollide[v] == nil then
-                            originalCollide[v] = v.CanCollide
-                        end
+                        if originalCollide[v] == nil then originalCollide[v] = v.CanCollide end
                         v.CanCollide = false
                     end
                 end
@@ -537,9 +591,7 @@ local function randomPlayerTp()
         if p ~= LocalPlayer and p.Character then
             local hrp = p.Character:FindFirstChild("HumanoidRootPart")
             local hum = p.Character:FindFirstChildOfClass("Humanoid")
-            if hrp and hum and hum.Health > 0 then
-                table.insert(candidates, hrp)
-            end
+            if hrp and hum and hum.Health > 0 then table.insert(candidates, hrp) end
         end
     end
     if tpAuraBotDetect then
@@ -549,9 +601,7 @@ local function randomPlayerTp()
                 local hrp = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Head") or model:FindFirstChildWhichIsA("BasePart")
                 if hrp then
                     local hum = model:FindFirstChildOfClass("Humanoid")
-                    if not hum or hum.Health > 0 then
-                        table.insert(candidates, hrp)
-                    end
+                    if not hum or hum.Health > 0 then table.insert(candidates, hrp) end
                 end
             end
         end
@@ -560,8 +610,7 @@ local function randomPlayerTp()
     local targetHrp = candidates[math.random(1, #candidates)]
     savedPosition = myHrp.CFrame
     local angle = math.random() * math.pi * 2
-    local dist = 4
-    local offset = Vector3.new(math.cos(angle) * dist, 0, math.sin(angle) * dist)
+    local offset = Vector3.new(math.cos(angle) * 4, 0, math.sin(angle) * 4)
     teleportCharacterTo(CFrame.new(targetHrp.Position + offset + Vector3.new(0, 3, 0)))
 end
 
@@ -593,9 +642,7 @@ local function hitboxLoop()
             for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= LocalPlayer and p.Character then
                     local hum = p.Character:FindFirstChildOfClass("Humanoid")
-                    if not hum or isCharAlive(p.Character, hum) then
-                        table.insert(targets, p.Character)
-                    end
+                    if not hum or isCharAlive(p.Character, hum) then table.insert(targets, p.Character) end
                 end
             end
             if hitboxBotDetect then
@@ -603,9 +650,7 @@ local function hitboxLoop()
                 for _, model in ipairs(botCache) do
                     if model and model.Parent then
                         local hum = model:FindFirstChildOfClass("Humanoid")
-                        if not hum or isCharAlive(model, hum) then
-                            table.insert(targets, model)
-                        end
+                        if not hum or isCharAlive(model, hum) then table.insert(targets, model) end
                     end
                 end
             end
@@ -615,9 +660,7 @@ local function hitboxLoop()
                     if part then
                         if not originalSizes[part] then originalSizes[part] = part.Size end
                         local s = originalSizes[part]
-                        part.Size = Vector3.new(math.max(s.X, hitboxSize),
-                                               math.max(s.Y, hitboxSize),
-                                               math.max(s.Z, hitboxSize))
+                        part.Size = Vector3.new(math.max(s.X, hitboxSize), math.max(s.Y, hitboxSize), math.max(s.Z, hitboxSize))
                     end
                 end
             end
@@ -635,15 +678,20 @@ end
 local function cleanup()
     isRunning = false
     _G.STRXcahts = nil
+    disableBypass()
 
     if aimWasScriptable then
         aimWasScriptable = false
         pcall(function()
-            if aimOriginalCamType then
-                Camera.CameraType = aimOriginalCamType
-            else
-                Camera.CameraType = Enum.CameraType.Custom
-            end
+            if aimOriginalCamType then Camera.CameraType = aimOriginalCamType
+            else Camera.CameraType = Enum.CameraType.Custom end
+        end)
+    end
+
+    if soundPlaying then
+        pcall(function()
+            local s = SoundService:FindFirstChild("STRX_GlobalSound")
+            if s then s:Destroy() end
         end)
     end
 
@@ -655,11 +703,12 @@ local function cleanup()
     playerConns = {}
     if flyConn then pcall(function() flyConn:Disconnect() end) flyConn = nil end
     if noclipConn then pcall(function() noclipConn:Disconnect() end) noclipConn = nil end
+    if antiFlingConn then pcall(function() antiFlingConn:Disconnect() end) antiFlingConn = nil end
     if flyBV then pcall(function() flyBV:Destroy() end) flyBV = nil end
     if flyBG then pcall(function() flyBG:Destroy() end) flyBG = nil end
     if spinAV then pcall(function() spinAV:Destroy() end) spinAV = nil end
     pcall(function() RunService:UnbindFromRenderStep("STRX_Aimbot_Move") end)
-    for _, name in ipairs({"STRXcahtsMenu","STRX_ESPGui","STRX_FOVGui","STRX_Watermark"}) do
+    for _, name in ipairs({"STRXcahtsMenu","STRX_ESPGui","STRX_FOVGui","STRX_Watermark","STRX_Crosshair"}) do
         local g = guiParent:FindFirstChild(name)
         if g then pcall(function() g:Destroy() end) end
     end
@@ -686,12 +735,8 @@ local function hoverStroke(btn, baseColor, hoverColor)
     s.Color = baseColor
     s.Thickness = 1
     s.Transparency = 0.5
-    btn.MouseEnter:Connect(function()
-        TweenService:Create(s, TweenInfo.new(0.15), {Color = hoverColor, Transparency = 0}):Play()
-    end)
-    btn.MouseLeave:Connect(function()
-        TweenService:Create(s, TweenInfo.new(0.15), {Color = baseColor, Transparency = 0.5}):Play()
-    end)
+    btn.MouseEnter:Connect(function() TweenService:Create(s, TweenInfo.new(0.15), {Color = hoverColor, Transparency = 0}):Play() end)
+    btn.MouseLeave:Connect(function() TweenService:Create(s, TweenInfo.new(0.15), {Color = baseColor, Transparency = 0.5}):Play() end)
     return s
 end
 
@@ -722,8 +767,10 @@ ESPGui.IgnoreGuiInset = true
 local FOVGui      = newScreenGui("STRX_FOVGui", 5)
 FOVGui.IgnoreGuiInset = true
 local WatermarkGui= newScreenGui("STRX_Watermark", 100)
+local CrosshairGui= newScreenGui("STRX_Crosshair", 99)
+CrosshairGui.IgnoreGuiInset = true
 
--- FOV çemberi
+-- FOV çemberi (Kapalı başlar)
 local FOVFrame = Instance.new("Frame", FOVGui)
 FOVFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 FOVFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
@@ -734,10 +781,52 @@ local FOVStroke = Instance.new("UIStroke", FOVFrame)
 FOVStroke.Color = Color3.fromRGB(0, 255, 100)
 FOVStroke.Thickness = 2
 
--- Watermark (FPS dinamik boyut)
+-- Crosshair (Özel Nişangah) - Kapalı başlar
+local CrosshairFrame = Instance.new("Frame", CrosshairGui)
+CrosshairFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+CrosshairFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+CrosshairFrame.BackgroundTransparency = 1
+CrosshairFrame.Size = UDim2.new(0, crosshairSize*2, 0, crosshairSize*2)
+CrosshairFrame.Visible = crosshairEnabled
+
+local chLines = {}
+for i = 1, 4 do
+    local f = Instance.new("Frame", CrosshairFrame)
+    f.BackgroundColor3 = crosshairColor
+    f.BorderSizePixel = 0
+    f.Visible = false
+    chLines[i] = f
+end
+-- 1: top, 2: bottom, 3: left, 4: right
+chLines[1].Size = UDim2.new(0, crosshairThickness, 0, crosshairSize/2)
+chLines[1].Position = UDim2.new(0.5, -crosshairThickness/2, 0, 0)
+chLines[2].Size = UDim2.new(0, crosshairThickness, 0, crosshairSize/2)
+chLines[2].Position = UDim2.new(0.5, -crosshairThickness/2, 1, -crosshairSize/2)
+chLines[3].Size = UDim2.new(0, crosshairSize/2, 0, crosshairThickness)
+chLines[3].Position = UDim2.new(0, 0, 0.5, -crosshairThickness/2)
+chLines[4].Size = UDim2.new(0, crosshairSize/2, 0, crosshairThickness)
+chLines[4].Position = UDim2.new(1, -crosshairSize/2, 0.5, -crosshairThickness/2)
+
+local function updateCrosshair()
+    CrosshairFrame.Visible = crosshairEnabled
+    CrosshairFrame.Size = UDim2.new(0, crosshairSize*2, 0, crosshairSize*2)
+    for i = 1, 4 do
+        chLines[i].BackgroundColor3 = crosshairColor
+    end
+    chLines[1].Size = UDim2.new(0, crosshairThickness, 0, crosshairSize/2)
+    chLines[1].Position = UDim2.new(0.5, -crosshairThickness/2, 0, 0)
+    chLines[2].Size = UDim2.new(0, crosshairThickness, 0, crosshairSize/2)
+    chLines[2].Position = UDim2.new(0.5, -crosshairThickness/2, 1, -crosshairSize/2)
+    chLines[3].Size = UDim2.new(0, crosshairSize/2, 0, crosshairThickness)
+    chLines[3].Position = UDim2.new(0, 0, 0.5, -crosshairThickness/2)
+    chLines[4].Size = UDim2.new(0, crosshairSize/2, 0, crosshairThickness)
+    chLines[4].Position = UDim2.new(1, -crosshairSize/2, 0.5, -crosshairThickness/2)
+end
+
+-- Watermark (Ping & FPS dinamik boyut)
 local wmFrame = Instance.new("Frame", WatermarkGui)
-wmFrame.Size = UDim2.new(0, 130, 0, 30) 
-wmFrame.Position = UDim2.new(1, -140, 0, 10)
+wmFrame.Size = UDim2.new(0, 170, 0, 30)
+wmFrame.Position = UDim2.new(1, -180, 0, 10)
 wmFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
 wmFrame.BackgroundTransparency = 0.25
 wmFrame.BorderSizePixel = 0
@@ -758,28 +847,37 @@ wmTitle.TextColor3 = Color3.new(1,1,1)
 wmTitle.Font = Enum.Font.GothamBold
 wmTitle.TextSize = 12
 
-local wmFPS = Instance.new("TextLabel", wmFrame)
-wmFPS.Size = UDim2.new(0, 40, 1, 0)
-wmFPS.BackgroundTransparency = 1
-wmFPS.Text = "| 60 FPS"
-wmFPS.TextColor3 = Color3.new(1,1,1)
-wmFPS.Font = Enum.Font.GothamBold
-wmFPS.TextSize = 12
-wmFPS.Visible = showFps
+local wmStats = Instance.new("TextLabel", wmFrame)
+wmStats.Size = UDim2.new(0, 60, 1, 0)
+wmStats.BackgroundTransparency = 1
+wmStats.Text = "| 60 FPS"
+wmStats.TextColor3 = Color3.new(1,1,1)
+wmStats.Font = Enum.Font.GothamBold
+wmStats.TextSize = 12
+
+-- Watermark'a tıklayınca menü aç/kapat (FPS/Ping logoları da tıklanabilir yapmak için Button kullanıldı)
+wmTitle.Active = true
+wmStats.Active = true
+local function toggleMenuFromWm()
+    ScreenGui.Enabled = not ScreenGui.Enabled
+end
+wmTitle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then toggleMenuFromWm() end
+end)
+wmStats.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then toggleMenuFromWm() end
+end)
 
 local function updateWmSize()
-    if showFps then
-        wmFrame.Size = UDim2.new(0, 135, 0, 30)
-        wmFPS.Visible = true
-    else
-        wmFrame.Size = UDim2.new(0, 90, 0, 30)
-        wmFPS.Visible = false
-    end
-    wmFrame.Position = UDim2.new(1, -wmFrame.Size.X.Offset - 10, 0, 10)
+    local w = 90
+    if showFps then w = w + 55 end
+    if showPing then w = w + 55 end
+    wmFrame.Size = UDim2.new(0, w, 0, 30)
+    wmFrame.Position = UDim2.new(1, -w - 10, 0, 10)
 end
 updateWmSize()
 
--- ============ ESP ============
+-- ============ ESP + HIGHLIGHT (CHAMS) ============
 local function hideESPData(data)
     if not data then return end
     if data.box then data.box.Visible = false end
@@ -795,6 +893,7 @@ local function destroyESPData(data)
     for _, k in ipairs({"box","nameLabel","distLabel","hpBarBg"}) do
         if data[k] then pcall(function() data[k]:Destroy() end) end
     end
+    if data.highlight then pcall(function() data.highlight:Destroy() end) end
     if data.conns then
         for _, c in ipairs(data.conns) do pcall(function() c:Disconnect() end) end
     end
@@ -842,13 +941,11 @@ local function createESPForModel(char)
 
     local espConns = {}
     espData[char] = {box=box, stroke=boxStroke, nameLabel=nameLbl, distLabel=distLbl,
-                     hpBarBg=hpBarBg, hpFill=hpFill, conns=espConns}
+                     hpBarBg=hpBarBg, hpFill=hpFill, conns=espConns, highlight=nil}
 
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then
-        table.insert(espConns, hum.Died:Connect(function()
-            removeESPForModel(char)
-        end))
+        table.insert(espConns, hum.Died:Connect(function() removeESPForModel(char) end))
     end
     table.insert(espConns, char.AncestryChanged:Connect(function(_, parent)
         if not parent then removeESPForModel(char) end
@@ -866,20 +963,65 @@ removeESPForModel = function(char)
     end
 end
 
--- ============ AIMBOT TARGET ============
+-- Highlight yönetimi
+local function updateHighlightFor(char)
+    local data = espData[char]
+    if not data then return end
+    if espChamsEnabled then
+        if not data.highlight then
+            local h = Instance.new("Highlight")
+            h.Name = "STRX_Highlight"
+            h.FillColor = espChamsColor
+            h.FillTransparency = 0.5
+            h.OutlineColor = espChamsColor
+            h.OutlineTransparency = 0
+            h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            h.Adornee = char
+            h.Parent = ESPGui
+            data.highlight = h
+        else
+            data.highlight.FillColor = espChamsColor
+            data.highlight.OutlineColor = espChamsColor
+        end
+    else
+        if data.highlight then
+            pcall(function() data.highlight:Destroy() end)
+            data.highlight = nil
+        end
+    end
+end
+
+-- ============ AIMBOT TARGET (Gelişmiş) ============
 local aimRayParams = RaycastParams.new()
 aimRayParams.FilterType = Enum.RaycastFilterType.Exclude
 
+local function isPlayerFriend(p)
+    if not p or p == LocalPlayer then return false end
+    local ok, isFriend = pcall(function() return LocalPlayer:IsFriendsWith(p.UserId) end)
+    return ok and isFriend
+end
+
+local function isSameTeam(p)
+    if not p or p == LocalPlayer then return false end
+    local ok1, t1 = pcall(function() return tostring(LocalPlayer.Team) end)
+    local ok2, t2 = pcall(function() return tostring(p.Team) end)
+    return ok1 and ok2 and t1 == t2
+end
+
 local function getAimbotTarget()
     local closest, shortest = nil, math.huge
-    local closestHum = nil
+    local closestHum, closestChar = nil, nil
     local center = Camera.ViewportSize / 2
     local myChar = LocalPlayer.Character
     if not myChar then return nil end
     local myHrp = myChar:FindFirstChild("HumanoidRootPart")
     local allChars = {}
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character then table.insert(allChars, p.Character) end
+        if p ~= LocalPlayer and p.Character then
+            if not (aimTeamCheck and isSameTeam(p)) and not (aimFriendCheck and isPlayerFriend(p)) then
+                table.insert(allChars, p.Character)
+            end
+        end
     end
     if aimbotBotDetect then
         refreshBotCache()
@@ -890,12 +1032,17 @@ local function getAimbotTarget()
     for _, char in ipairs(allChars) do
         local hum = char:FindFirstChildOfClass("Humanoid")
         if isCharAlive(char, hum) then
-            local targetPart = char:FindFirstChild(aimbotAimPart)
-                or char:FindFirstChild("HumanoidRootPart")
-                or char:FindFirstChild("Head")
-                or char:FindFirstChildWhichIsA("BasePart")
+            local targetPart = char:FindFirstChild(aimbotAimPart) or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head") or char:FindFirstChildWhichIsA("BasePart")
             if targetPart then
-                local sp, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                -- Aim Prediction
+                local aimPos = targetPart.Position
+                if aimPrediction and targetPart.AssemblyLinearVelocity.Magnitude > 5 then
+                    local dist = (aimPos - myHrp.Position).Magnitude
+                    local travelTime = dist / 3000 -- varsayılan mermi hızı
+                    aimPos = aimPos + (targetPart.AssemblyLinearVelocity * travelTime * aimPredictionMultiplier)
+                end
+                
+                local sp, onScreen = Camera:WorldToViewportPoint(aimPos)
                 if onScreen then
                     local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
                     if d <= aimbotFOV and d < shortest then
@@ -903,13 +1050,15 @@ local function getAimbotTarget()
                         if aimbotWallCheck and myHrp then
                             aimRayParams.FilterDescendantsInstances = {char, myChar}
                             local origin = myHrp.Position + Vector3.new(0, 1.5, 0)
-                            local r = workspace:Raycast(origin, targetPart.Position - origin, aimRayParams)
+                            local r = workspace:Raycast(origin, aimPos - origin, aimRayParams)
                             if r then ok = false end
                         end
                         if ok then
                             shortest = d
                             closest = targetPart
                             closestHum = hum
+                            closestChar = char
+                            aimTargetPos = aimPos -- Store for renderstep
                         end
                     end
                 end
@@ -918,6 +1067,15 @@ local function getAimbotTarget()
     end
     aimbotTargetHum = closestHum
     return closest
+end
+local aimTargetPos = Vector3.zero -- Store for predicted position
+
+-- ============ PING / STATS ============
+local function getPing()
+    local ok, ping = pcall(function()
+        return math.floor(stats().Network.ServerStatsItem["Data Ping"]:GetValue())
+    end)
+    return ok and ping or 0
 end
 
 -- ============ MENU FRAME ============
@@ -931,10 +1089,8 @@ MainFrame.BorderSizePixel = 0
 MainFrame.ClipsDescendants = true
 addCorner(MainFrame, 16)
 
--- dış glow
 local mainStroke = addStroke(MainFrame, Color3.fromRGB(255, 140, 0), 1.5, 0.1)
 
--- arka plan dekoratif gradient + logo
 local bgGrad = Instance.new("Frame", MainFrame)
 bgGrad.Size = UDim2.new(1, 0, 1, 0)
 bgGrad.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
@@ -1006,23 +1162,12 @@ versionBadge.Size = UDim2.new(0, 54, 0, 20)
 versionBadge.Position = UDim2.new(0, 148, 0.5, -10)
 versionBadge.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
 versionBadge.BackgroundTransparency = 0.2
-versionBadge.Text = "v36.2"
+versionBadge.Text = "v37.0"
 versionBadge.TextColor3 = Color3.new(1,1,1)
 versionBadge.Font = Enum.Font.GothamBold
 versionBadge.TextSize = 10
 versionBadge.ZIndex = 4
 addCorner(versionBadge, 6)
-
-local fpsLbl = Instance.new("TextLabel", Title)
-fpsLbl.Size = UDim2.new(0, 110, 1, 0)
-fpsLbl.Position = UDim2.new(1, -180, 0, 0)
-fpsLbl.BackgroundTransparency = 1
-fpsLbl.Text = "60 FPS"
-fpsLbl.TextColor3 = Color3.fromRGB(180, 180, 190)
-fpsLbl.Font = Enum.Font.GothamMedium
-fpsLbl.TextSize = 11
-fpsLbl.TextXAlignment = Enum.TextXAlignment.Right
-fpsLbl.ZIndex = 4
 
 local closeBtn = Instance.new("TextButton", Title)
 closeBtn.Size = UDim2.new(0, 34, 0, 34)
@@ -1035,12 +1180,10 @@ closeBtn.TextSize = 16
 closeBtn.AutoButtonColor = false
 closeBtn.ZIndex = 4
 addCorner(closeBtn, 8)
-closeBtn.MouseButton1Click:Connect(function()
-    ScreenGui.Enabled = false
-end)
+closeBtn.MouseButton1Click:Connect(function() ScreenGui.Enabled = false end)
 
 -- ============ TAB BAR ============
-local tabNames = {"Player","ESP","Aimbot","TP","Ayarlar"}
+local tabNames = {"Player","ESP","Aimbot","Araclar","Ayarlar"}
 local tabs = {}
 local tabHolder = Instance.new("Frame", MainFrame)
 tabHolder.Size = UDim2.new(1, -30, 0, 40)
@@ -1285,6 +1428,31 @@ local function makeButton(parent, text, x, y, w, h, color, callback)
     return btn
 end
 
+local function makeTextBox(parent, placeholder, y, onChanged)
+    local f = Instance.new("Frame", parent)
+    f.Size = UDim2.new(0, 320, 0, 38)
+    f.Position = UDim2.new(0, 8, 0, y)
+    f.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
+    f.BorderSizePixel = 0
+    f.ZIndex = 2
+    addCorner(f, 8)
+    addStroke(f, Color3.fromRGB(45, 45, 60), 1, 0.4)
+
+    local txt = Instance.new("TextBox", f)
+    txt.Size = UDim2.new(1, -24, 1, -10)
+    txt.Position = UDim2.new(0, 12, 0, 5)
+    txt.BackgroundTransparency = 1
+    txt.Text = placeholder
+    txt.TextColor3 = Color3.new(1,1,1)
+    txt.Font = Enum.Font.GothamMedium
+    txt.TextSize = 12
+    txt.ZIndex = 3
+    txt.ClearTextOnFocus = false
+    txt.TextXAlignment = Enum.TextXAlignment.Left
+    txt.FocusLost:Connect(function() pcall(onChanged, txt.Text) end)
+    return txt
+end
+
 local function makeSectionLabel(parent, text, y)
     local lbl = Instance.new("TextLabel", parent)
     lbl.Size = UDim2.new(0, 320, 0, 20)
@@ -1299,7 +1467,6 @@ local function makeSectionLabel(parent, text, y)
     return lbl
 end
 
--- FIX: UI kilitlenmesini (AutomaticCanvasSize bug) önlemek için sabit CanvasSize kullanıldı.
 local function makePage()
     local p = Instance.new("ScrollingFrame", content)
     p.Size = UDim2.new(1, -12, 1, -12)
@@ -1308,7 +1475,7 @@ local function makePage()
     p.BorderSizePixel = 0
     p.ScrollBarThickness = 4
     p.ScrollBarImageColor3 = Color3.fromRGB(255, 140, 0)
-    p.CanvasSize = UDim2.new(0, 0, 0, 800) -- Sabit boyut, oyunu dondurmaz
+    p.CanvasSize = UDim2.new(0, 0, 0, 1200) -- Yüksek ihtimalle yeterli
     p.ScrollingDirection = Enum.ScrollingDirection.Y
     p.Visible = false
     p.ZIndex = 2
@@ -1318,7 +1485,7 @@ end
 local playerPage  = makePage()
 local espPage     = makePage()
 local aimbotPage  = makePage()
-local tpPage      = makePage()
+local utilityPage = makePage()
 local settingsPage= makePage()
 
 -- ============ PLAYER TAB ============
@@ -1327,23 +1494,25 @@ makeToggle(playerPage, "Fly (WASD)", 28, function(s) if s then startFly(false) e
 makeSlider(playerPage, "Fly Hizi", 1, 500, flySpeed, 70, function(v) flySpeed = v end)
 makeToggle(playerPage, "WalkSpeed Override", 134, function(s) walkSpeedEnabled = s; applyWalkSpeed() end, "walkSpeed")
 makeSlider(playerPage, "WalkSpeed", 1, 500, walkSpeedValue, 176, function(v) walkSpeedValue = v; applyWalkSpeed() end)
-makeToggle(playerPage, "JumpPower Override", 240, function(s) jumpPowerEnabled = s; applyJumpPower() end)
-makeSlider(playerPage, "JumpPower", 10, 500, jumpPowerValue, 282, function(v) jumpPowerValue = v; if jumpPowerEnabled then applyJumpPower() end end)
-makeToggle(playerPage, "Noclip", 346, function(s) toggleNoclip(s) end, "noclip")
-makeToggle(playerPage, "Sonsuz Ziplama", 388, function(s) infiniteJumpEnabled = s end, "infJump")
-makeToggle(playerPage, "Spin", 430, function(s) toggleSpin(s) end, "spin")
-makeSlider(playerPage, "Spin Hizi", 1, 200, spinSpeed, 472, function(v) spinSpeed = v; if spinAV then spinAV.AngularVelocity = Vector3.new(0,v,0) end end)
+makeToggle(playerPage, "Speed Spoofer (Anti-Cheat Bypass)", 240, function(s) speedSpoofEnabled = s; if s then enableBypass() else disableBypass() end end)
+makeToggle(playerPage, "Anti-Fling", 282, function(s) toggleAntiFling(s) end)
+makeToggle(playerPage, "JumpPower Override", 324, function(s) jumpPowerEnabled = s; applyJumpPower() end)
+makeSlider(playerPage, "JumpPower", 10, 500, jumpPowerValue, 366, function(v) jumpPowerValue = v; if jumpPowerEnabled then applyJumpPower() end end)
+makeToggle(playerPage, "Noclip", 430, function(s) toggleNoclip(s) end, "noclip")
+makeToggle(playerPage, "Sonsuz Ziplama", 472, function(s) infiniteJumpEnabled = s end, "infJump")
+makeToggle(playerPage, "Spin", 514, function(s) toggleSpin(s) end, "spin")
+makeSlider(playerPage, "Spin Hizi", 1, 200, spinSpeed, 556, function(v) spinSpeed = v; if spinAV then spinAV.AngularVelocity = Vector3.new(0,v,0) end end)
 
-makeSectionLabel(playerPage, "Kamera & Ekstra", 536)
-makeToggle(playerPage, "Kamera FOV Ac/Kapat", 560, function(s)
+makeSectionLabel(playerPage, "Kamera & Ekstra", 620)
+makeToggle(playerPage, "Kamera FOV Ac/Kapat", 644, function(s)
     camFovEnabled = s
     if not s then pcall(function() Camera.FieldOfView = 70 end) end
 end)
-makeSlider(playerPage, "Kamera FOV Degeri", 50, 120, camFovValue, 602, function(v)
+makeSlider(playerPage, "Kamera FOV Degeri", 50, 120, camFovValue, 686, function(v)
     camFovValue = v
     if camFovEnabled then pcall(function() Camera.FieldOfView = v end) end
 end)
-makeToggle(playerPage, "Anti-AFK", 666, function(s) antiAfkEnabled = s end)
+makeToggle(playerPage, "Anti-AFK", 750, function(s) antiAfkEnabled = s end)
 
 -- ============ ESP TAB ============
 makeSectionLabel(espPage, "Gorunum", 4)
@@ -1363,18 +1532,23 @@ makeToggle(espPage, "ESP Ac/Kapat", 28, function(s)
         for _, data in pairs(espData) do hideESPData(data) end
     end
 end, "esp")
-makeToggle(espPage, "Isim Goster", 70, function(s) espShowName = s end)
-makeToggle(espPage, "Can Goster", 112, function(s) espShowHealth = s end)
-makeToggle(espPage, "Mesafe Goster", 154, function(s) espShowDistance = s end)
-makeSlider(espPage, "Max Mesafe", 50, 3000, espMaxDistance, 196, function(v) espMaxDistance = v end)
-makeSectionLabel(espPage, "Bot Tespiti", 260)
-makeToggle(espPage, "Botlari Algila", 284, function(s)
+makeToggle(espPage, "Chams (Highlight) Ac/Kapat", 70, function(s)
+    espChamsEnabled = s
+    if espEnabled then
+        for char, _ in pairs(espData) do updateHighlightFor(char) end
+    end
+end)
+makeToggle(espPage, "Isim Goster", 112, function(s) espShowName = s end)
+makeToggle(espPage, "Can Goster", 154, function(s) espShowHealth = s end)
+makeToggle(espPage, "Mesafe Goster", 196, function(s) espShowDistance = s end)
+makeSlider(espPage, "Max Mesafe", 50, 3000, espMaxDistance, 238, function(v) espMaxDistance = v end)
+
+makeSectionLabel(espPage, "Bot Tespiti", 302)
+makeToggle(espPage, "Botlari Algila (ESP)", 326, function(s)
     espBotDetect = s
     if not s then
         for model, _ in pairs(espData) do
-            if not Players:GetPlayerFromCharacter(model) then
-                removeESPForModel(model)
-            end
+            if not Players:GetPlayerFromCharacter(model) then removeESPForModel(model) end
         end
     elseif espEnabled then
         refreshBotCache()
@@ -1383,11 +1557,11 @@ makeToggle(espPage, "Botlari Algila", 284, function(s)
         end
     end
 end)
-makeToggle(espPage, "Agresif Bot Tarama", 326, function(s) botScanAggressive = s end)
-makeSlider(espPage, "Tarama Derinligi", 2, 6, botScanDepth, 368, function(v) botScanDepth = v end)
+makeToggle(espPage, "Agresif Bot Tarama", 368, function(s) botScanAggressive = s end)
+makeSlider(espPage, "Tarama Derinligi", 2, 6, botScanDepth, 410, function(v) botScanDepth = v end)
 
 -- ============ AIMBOT TAB ============
-makeSectionLabel(aimbotPage, "Aimbot", 4)
+makeSectionLabel(aimbotPage, "Aimbot Ayarlari", 4)
 makeToggle(aimbotPage, "Aimbot Ac/Kapat", 28, function(s) aimbotEnabled = s; if not s then aimbotTarget = nil end end, "aimbot")
 makeSlider(aimbotPage, "FOV (Cember Boyutu)", 20, 400, aimbotFOV, 70, function(v) aimbotFOV = v end)
 makeSlider(aimbotPage, "Yumusaklik", 1, 20, aimbotSmoothness, 134, function(v) aimbotSmoothness = v end)
@@ -1430,134 +1604,84 @@ aimKeyBtn.MouseButton1Click:Connect(function()
     aimKeyBtn.Text = "Bekleniyor..."
 end)
 
-makeSectionLabel(aimbotPage, "Hitbox", 336)
-local hbRow = Instance.new("Frame", aimbotPage)
-hbRow.Size = UDim2.new(0, 320, 0, 38)
-hbRow.Position = UDim2.new(0, 8, 0, 360)
-hbRow.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
-hbRow.BorderSizePixel = 0
-hbRow.ZIndex = 2
-addCorner(hbRow, 8)
-addStroke(hbRow, Color3.fromRGB(45, 45, 60), 1, 0.4)
-local hbLbl = Instance.new("TextLabel", hbRow)
-hbLbl.Size = UDim2.new(1, -130, 1, 0)
-hbLbl.Position = UDim2.new(0, 12, 0, 0)
-hbLbl.BackgroundTransparency = 1
-hbLbl.Text = "Hitbox Genisletici"
-hbLbl.TextColor3 = Color3.fromRGB(230, 230, 240)
-hbLbl.Font = Enum.Font.GothamMedium
-hbLbl.TextSize = 13
-hbLbl.TextXAlignment = Enum.TextXAlignment.Left
-hbLbl.ZIndex = 3
-local hbBtn = Instance.new("TextButton", hbRow)
-hbBtn.Size = UDim2.new(0, 52, 0, 24)
-hbBtn.Position = UDim2.new(1, -58, 0.5, -12)
-hbBtn.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
-hbBtn.BorderSizePixel = 0
-hbBtn.Text = "OFF"
-hbBtn.TextColor3 = Color3.new(1,1,1)
-hbBtn.Font = Enum.Font.GothamBold
-hbBtn.TextSize = 11
-hbBtn.AutoButtonColor = false
-hbBtn.ZIndex = 3
-addCorner(hbBtn, 6)
-addStroke(hbBtn, Color3.new(1,1,1), 1, 0.8)
-hbBtn.MouseButton1Click:Connect(function()
-    hitboxEnabled = not hitboxEnabled
-    hbBtn.Text = hitboxEnabled and "ON" or "OFF"
-    TweenService:Create(hbBtn, TweenInfo.new(0.2), {
-        BackgroundColor3 = hitboxEnabled and Color3.fromRGB(0, 180, 90) or Color3.fromRGB(255, 140, 0)
-    }):Play()
-    if hitboxEnabled then task.spawn(hitboxLoop) end
+makeSectionLabel(aimbotPage, "Gelismis Hedefleme", 336)
+makeToggle(aimbotPage, "Aim Prediction (Hareket Tahmini)", 360, function(s) aimPrediction = s end)
+makeSlider(aimbotPage, "Tahmin Carpani", 1, 5, aimPredictionMultiplier, 402, function(v) aimPredictionMultiplier = v end)
+makeToggle(aimbotPage, "Takim Arkadaslarini Yok Say", 466, function(s) aimTeamCheck = s end)
+makeToggle(aimbotPage, "Arkadaslarini Yok Say", 508, function(s) aimFriendCheck = s end)
+makeToggle(aimbotPage, "Orbit Aimbot (Etrafinda Don)", 550, function(s) 
+    orbitEnabled = s 
+    if s then orbitAngle = 0 end
 end)
-makeSlider(aimbotPage, "Hitbox Boyutu", 2, 15, hitboxSize, 402, function(v) hitboxSize = v end)
-makeToggle(aimbotPage, "Hitbox Botlari Algila", 466, function(s) hitboxBotDetect = s end)
+makeSlider(aimbotPage, "Orbit Hizi", 1, 20, orbitSpeed, 592, function(v) orbitSpeed = v end)
+makeSlider(aimbotPage, "Orbit Yaricapi", 1, 20, orbitRadius, 654, function(v) orbitRadius = v end)
 
-local showFovRow = Instance.new("Frame", aimbotPage)
-showFovRow.Size = UDim2.new(0, 320, 0, 38)
-showFovRow.Position = UDim2.new(0, 8, 0, 508)
-showFovRow.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
-showFovRow.BorderSizePixel = 0
-showFovRow.ZIndex = 2
-addCorner(showFovRow, 8)
-addStroke(showFovRow, Color3.fromRGB(45, 45, 60), 1, 0.4)
-local sfLbl = Instance.new("TextLabel", showFovRow)
-sfLbl.Size = UDim2.new(1, -130, 1, 0)
-sfLbl.Position = UDim2.new(0, 12, 0, 0)
-sfLbl.BackgroundTransparency = 1
-sfLbl.Text = "FOV Cizgisini Goster"
-sfLbl.TextColor3 = Color3.fromRGB(230, 230, 240)
-sfLbl.Font = Enum.Font.GothamMedium
-sfLbl.TextSize = 13
-sfLbl.TextXAlignment = Enum.TextXAlignment.Left
-sfLbl.ZIndex = 3
-local sfBtn = Instance.new("TextButton", showFovRow)
-sfBtn.Size = UDim2.new(0, 52, 0, 24)
-sfBtn.Position = UDim2.new(1, -58, 0.5, -12)
-sfBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 90)
-sfBtn.BorderSizePixel = 0
-sfBtn.Text = "ON"
-sfBtn.TextColor3 = Color3.new(1,1,1)
-sfBtn.Font = Enum.Font.GothamBold
-sfBtn.TextSize = 11
-sfBtn.AutoButtonColor = false
-sfBtn.ZIndex = 3
-addCorner(sfBtn, 6)
-sfBtn.MouseButton1Click:Connect(function()
-    showFOVCircle = not showFOVCircle
-    sfBtn.Text = showFOVCircle and "ON" or "OFF"
-    sfBtn.BackgroundColor3 = showFOVCircle and Color3.fromRGB(0, 180, 90) or Color3.fromRGB(255, 140, 0)
-end)
+makeSectionLabel(aimbotPage, "Crosshair (Nisangah)", 718)
+makeToggle(aimbotPage, "Ozel Nisangah Ac/Kapat", 742, function(s) crosshairEnabled = s; updateCrosshair() end)
+makeSlider(aimbotPage, "Nisangah Boyutu", 4, 30, crosshairSize, 784, function(v) crosshairSize = v; updateCrosshair() end)
 
--- ============ TP TAB ============
-makeSectionLabel(tpPage, "Isinlanma", 4)
-local tpAuraKbBtn = makeKeybindAction(tpPage, "TP Aura (Rastgele)", 28)
-tpAuraKbBtn.MouseButton1Click:Connect(function()
-    listeningForTpAuraKey = true
-    tpAuraKbBtn.Text = "..."
+-- ============ ARACLAR TAB ============
+makeSectionLabel(utilityPage, "Isinlanma", 4)
+local tpAuraKbBtn = makeKeybindAction(utilityPage, "TP Aura (Rastgele)", 28)
+tpAuraKbBtn.MouseButton1Click:Connect(function() listeningForTpAuraKey = true; tpAuraKbBtn.Text = "..." end)
+local lookTpKbBtn = makeKeybindAction(utilityPage, "Baktigin Yere Isinlan", 70)
+lookTpKbBtn.MouseButton1Click:Connect(function() listeningForLookTpKey = true; lookTpKbBtn.Text = "..." end)
+makeButton(utilityPage, "Geri Don (Son Isinlanmadan)", 8, 120, 320, 38, Color3.fromRGB(200,100,60), goBack)
+makeToggle(utilityPage, "Tikla-Isinlan (Mouse/Touch)", 170, function(s) clickTpEnabled = s end, "clickTp")
+makeToggle(utilityPage, "Botlari Algila (TP Aura)", 212, function(s) tpAuraBotDetect = s end)
+
+makeSectionLabel(utilityPage, "Eglence (Troll)", 266)
+makeToggle(utilityPage, "Chat Spammer", 290, function(s) spamEnabled = s end)
+makeTextBox(utilityPage, "Spam Mesaji...", 332, function(t) spamText = t end)
+makeSlider(utilityPage, "Spam Gecikmesi (sn)", 0.5, 5, spamDelay, 374, function(v) spamDelay = v end) -- float math.floor handles later
+
+makeToggle(utilityPage, "Global Sound Player", 438, function(s) 
+    soundPlaying = s 
+    local existing = SoundService:FindFirstChild("STRX_GlobalSound")
+    if s and soundIdInput ~= "" then
+        if not existing then
+            local snd = Instance.new("Sound", SoundService)
+            snd.Name = "STRX_GlobalSound"
+            snd.SoundId = "rbxassetid://" .. soundIdInput
+            snd.Looped = true
+            snd:Play()
+        else
+            existing:Play()
+        end
+    else
+        if existing then existing:Stop() end
+    end
 end)
-local lookTpKbBtn = makeKeybindAction(tpPage, "Baktigin Yere Isinlan", 70)
-lookTpKbBtn.MouseButton1Click:Connect(function()
-    listeningForLookTpKey = true
-    lookTpKbBtn.Text = "..."
+makeTextBox(utilityPage, "Sound ID (Orn: 123456)", 480, function(t) 
+    soundIdInput = t 
+    if soundPlaying then
+        local existing = SoundService:FindFirstChild("STRX_GlobalSound")
+        if existing then existing:Destroy() end
+        local snd = Instance.new("Sound", SoundService)
+        snd.Name = "STRX_GlobalSound"
+        snd.SoundId = "rbxassetid://" .. t
+        snd.Looped = true
+        snd:Play()
+    end
 end)
-makeButton(tpPage, "Geri Don (Son Isinlanmadan)", 8, 120, 320, 38, Color3.fromRGB(200,100,60), goBack)
-makeToggle(tpPage, "Tikla-Isinlan (Mouse/Touch)", 170, function(s) clickTpEnabled = s end, "clickTp")
-makeToggle(tpPage, "Botlari Algila (TP Aura)", 212, function(s) tpAuraBotDetect = s end)
-local tpInfo = Instance.new("TextLabel", tpPage)
-tpInfo.Size = UDim2.new(0, 320, 0, 70)
-tpInfo.Position = UDim2.new(0, 8, 0, 256)
-tpInfo.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-tpInfo.BackgroundTransparency = 0.3
-tpInfo.Text = "Tus atamak icin 'Ata' butonuna tikla,\nsonra istedigin tusa bas. Her basisda tetiklenir.\nTikla-Isinlan: Menu kapaliyken ekrana tiklayarak isinlan."
-tpInfo.TextColor3 = Color3.fromRGB(190, 190, 200)
-tpInfo.Font = Enum.Font.Gotham
-tpInfo.TextSize = 11
-tpInfo.TextWrapped = true
-tpInfo.ZIndex = 2
-addCorner(tpInfo, 8)
 
 -- ============ AYARLAR TAB ============
 makeSectionLabel(settingsPage, "Sistem", 4)
 makeToggle(settingsPage, "RGB Renk Modu", 28, function(s) rgbEnabled = s end)
-makeToggle(settingsPage, "FPS Sayaci (Sag Ust)", 70, function(s) 
-    showFps = s 
-    updateWmSize() -- FPS acilip kapaninca watermark boyutu aninda guncellenir
-end)
-local menuKeyRow = makeKeybindAction(settingsPage, "Menu Ac/Kapat Tusu", 112)
+makeToggle(settingsPage, "FPS Goster", 70, function(s) showFps = s; updateWmSize() end)
+makeToggle(settingsPage, "Ping Goster", 112, function(s) showPing = s; updateWmSize() end)
+makeToggle(settingsPage, "Metatable Bypass / Hook", 154, function(s) if s then enableBypass() else disableBypass() end end)
+
+local menuKeyRow = makeKeybindAction(settingsPage, "Menu Ac/Kapat Tusu", 196)
 menuKeyRow.Text = keybinds.menu.key and keybinds.menu.key.Name or "Insert"
-menuKeyRow.MouseButton1Click:Connect(function()
-    listeningForBind = "menu"
-    menuKeyRow.Text = "..."
-end)
-makeButton(settingsPage, "Scripti Kaldir (Unload)", 8, 164, 320, 38, Color3.fromRGB(200, 55, 55), function()
-    cleanup()
-end)
+menuKeyRow.MouseButton1Click:Connect(function() listeningForBind = "menu"; menuKeyRow.Text = "..." end)
+
+makeButton(settingsPage, "Scripti Kaldir (Unload)", 8, 248, 320, 38, Color3.fromRGB(200, 55, 55), function() cleanup() end)
 local creditLbl = Instance.new("TextLabel", settingsPage)
 creditLbl.Size = UDim2.new(0, 320, 0, 40)
-creditLbl.Position = UDim2.new(0, 8, 0, 214)
+creditLbl.Position = UDim2.new(0, 8, 0, 298)
 creditLbl.BackgroundTransparency = 1
-creditLbl.Text = "STRXCHATS v36.2\nInsert = menu, RGB = dinamik"
+creditLbl.Text = "STRXCHATS v37.0\nInsert = menu, Logo = menu"
 creditLbl.TextColor3 = Color3.fromRGB(140, 140, 150)
 creditLbl.Font = Enum.Font.Gotham
 creditLbl.TextSize = 11
@@ -1565,7 +1689,7 @@ creditLbl.TextWrapped = true
 creditLbl.ZIndex = 2
 
 -- ============ PAGE SWITCH ============
-local pages = {Player=playerPage, ESP=espPage, Aimbot=aimbotPage, TP=tpPage, Ayarlar=settingsPage}
+local pages = {Player=playerPage, ESP=espPage, Aimbot=aimbotPage, Araclar=utilityPage, Ayarlar=settingsPage}
 local activeTab = "Player"
 local function showPage(name)
     activeTab = name
@@ -1759,7 +1883,7 @@ track(Players.PlayerRemoving:Connect(function(p)
     end
 end))
 
--- ============ FPS LOOP ============
+-- ============ FPS & PING LOOP ============
 local fpsCounter, fpsTimer = 0, tick()
 track(RunService.RenderStepped:Connect(function()
     if not isRunning then return end
@@ -1768,9 +1892,16 @@ track(RunService.RenderStepped:Connect(function()
         local cur = fpsCounter
         fpsCounter = 0
         fpsTimer = tick()
-        if showFps then
-            fpsLbl.Text = cur.." FPS"
-            wmFPS.Text = "| "..cur.." FPS"
+        
+        local statsText = ""
+        if showFps then statsText = statsText .. "| " .. cur .. " FPS " end
+        if showPing then statsText = statsText .. "| " .. getPing() .. " ms" end
+        
+        if statsText == "" then
+            wmStats.Visible = false
+        else
+            wmStats.Visible = true
+            wmStats.Text = statsText
         end
     end
 end))
@@ -1804,7 +1935,7 @@ task.spawn(function()
                 bgLogo.TextColor3 = col
                 bgLogo.TextTransparency = 0.85
                 wmTitle.TextColor3 = col
-                wmFPS.TextColor3 = col
+                wmStats.TextColor3 = col
                 wmStroke.Color = col
                 FOVStroke.Color = col
                 mainStroke.Color = col
@@ -1815,7 +1946,7 @@ task.spawn(function()
                 bgLogo.TextColor3 = Color3.new(1,1,1)
                 bgLogo.TextTransparency = 0.9
                 wmTitle.TextColor3 = Color3.new(1,1,1)
-                wmFPS.TextColor3 = Color3.new(1,1,1)
+                wmStats.TextColor3 = Color3.new(1,1,1)
                 wmStroke.Color = Color3.fromRGB(255, 140, 0)
                 FOVStroke.Color = Color3.fromRGB(0, 255, 100)
                 mainStroke.Color = Color3.fromRGB(255, 140, 0)
@@ -1823,6 +1954,19 @@ task.spawn(function()
                 versionBadge.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
             end
         end)
+    end
+end)
+
+-- ============ CHAT SPAMMER LOOP ============
+task.spawn(function()
+    while isRunning do
+        task.wait(math.max(spamDelay, 1)) -- En az 1 saniye aralıkla spamlar (ban yememek icin)
+        if not isRunning then break end
+        if spamEnabled and spamText ~= "" then
+            pcall(function()
+                game:GetService("ReplicatedStorage").DefaultChatSystemChatEvents.SayMessageRequest:FireServer(spamText, "All")
+            end)
+        end
     end
 end)
 
@@ -1852,6 +1996,8 @@ task.spawn(function()
                 for _, char in ipairs(allChars) do
                     seen[char] = true
                     if not espData[char] then createESPForModel(char) end
+                    if espChamsEnabled then updateHighlightFor(char) end
+                    
                     local hum = char:FindFirstChildOfClass("Humanoid")
                     local head = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildWhichIsA("BasePart")
                     local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head") or char:FindFirstChildWhichIsA("BasePart")
@@ -1911,9 +2057,28 @@ task.spawn(function()
                     if not seen[model] then removeESPForModel(model) end
                 end
             end)
+        else
+            -- ESP Kapalıyken Highlight'ları temizle
+            for char, data in pairs(espData) do
+                hideESPData(data)
+                if data.highlight then pcall(function() data.highlight:Destroy() end); data.highlight = nil end
+            end
         end
     end
 end)
+
+-- ============ ORBIT LOOP ============
+track(RunService.Heartbeat:Connect(function(dt)
+    if not isRunning or not orbitEnabled or not aimbotTarget then return end
+    pcall(function()
+        local _, hrp = safeCharacter()
+        if hrp and aimbotTarget.Parent then
+            orbitAngle = (orbitAngle + orbitSpeed * dt) % (math.pi * 2)
+            local offset = Vector3.new(math.cos(orbitAngle) * orbitRadius, 0, math.sin(orbitAngle) * orbitRadius)
+            hrp.CFrame = CFrame.lookAt(aimbotTarget.Position + offset, aimbotTarget.Position)
+        end
+    end)
+end))
 
 -- ============ AIMBOT RENDERSTEP ============
 RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value + 1, function()
@@ -1970,9 +2135,13 @@ RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value
             end
             local alpha = 1 / math.max(aimbotSmoothness, 1)
             local camPos = hrp.Position + aimCamOffset
-            local desiredCF = CFrame.lookAt(camPos, aimbotTarget.Position)
+            
+            local targetPos = aimbotTarget.Position
+            if aimPrediction then targetPos = aimTargetPos end
+            
+            local desiredCF = CFrame.lookAt(camPos, targetPos)
             Camera.CFrame = Camera.CFrame:Lerp(desiredCF, alpha)
-            local toTarget = aimbotTarget.Position - hrp.Position
+            local toTarget = targetPos - hrp.Position
             local flat = Vector3.new(toTarget.X, 0, toTarget.Z)
             if flat.Magnitude > 0.05 then
                 local rotCF = CFrame.lookAt(hrp.Position, hrp.Position + flat.Unit)
@@ -2004,4 +2173,4 @@ task.spawn(function()
     end
 end)
 
-print("STRXcahts v36.2 | Sorunsuz baslatici ve guncel arayuz entegre edildi")
+print("STRXcahts v37.0 | Tum yeni ozellikler ve optimizasyonlar tamamlandi")
