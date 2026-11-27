@@ -1,4 +1,5 @@
 if _G.STRXcahts and _G.STRXcahts.Cleanup then pcall(_G.STRXcahts.Cleanup) end
+
 task.wait(1)
 
 local Players           = game:GetService("Players")
@@ -14,6 +15,7 @@ local LocalPlayer       = Players.LocalPlayer
 local Camera            = workspace.CurrentCamera
 
 local isRunning = true
+
 local connections = {}
 local function track(c) table.insert(connections, c); return c end
 
@@ -23,26 +25,23 @@ end))
 
 local function getGuiParent()
     local s, r = pcall(function() return gethui() end)
-    if s and typeof(r) == "Instance" then
-        local ok = pcall(function() return r:GetChildren() end)
+    if s and r then
+        local ok = pcall(function() r:GetChildren() end)
         if ok then return r end
     end
     local s2, r2 = pcall(function() return game:GetService("CoreGui") end)
-    if s2 and typeof(r2) == "Instance" then
-        local ok2 = pcall(function() return r2:GetChildren() end)
+    if s2 and r2 then
+        local ok2 = pcall(function() r2:GetChildren() end)
         if ok2 then return r2 end
     end
     local s3, r3 = pcall(function() return LocalPlayer:WaitForChild("PlayerGui", 10) end)
-    if s3 and typeof(r3) == "Instance" then return r3 end
+    if s3 and r3 then return r3 end
     return game:GetService("CoreGui")
 end
 local guiParent = getGuiParent()
 
 local flyEnabled, flySpeed = false, 50
 local walkSpeedEnabled, walkSpeedValue = false, 30
-local speedSpoofEnabled = false
-local bypassEnabled = false
-local antiFlingEnabled = false
 local jumpPowerEnabled, jumpPowerValue = false, 50
 local spinEnabled, spinSpeed = false, 20
 local noclipEnabled = false
@@ -63,9 +62,8 @@ local espVisibleColor = Color3.fromRGB(0, 255, 100)
 local espHiddenColor  = Color3.fromRGB(255, 60, 60)
 local espMaxDistance  = 1000
 local espChamsEnabled = false
-local espChamsColor = Color3.fromRGB(255, 0, 0)
+local espChamsColor = Color3.fromRGB(255, 0, 120)
 local espData = {}
-
 local aimbotEnabled = false
 local aimbotKey = Enum.UserInputType.MouseButton2
 local aimbotFOV = 150
@@ -85,12 +83,20 @@ local orbitEnabled = false
 local orbitSpeed = 5
 local orbitRadius = 5
 local orbitAngle = 0
-
 local crosshairEnabled = false
 local crosshairColor = Color3.fromRGB(0, 255, 0)
 local crosshairSize = 10
 local crosshairThickness = 2
-
+local speedSpoofEnabled = false
+local speedSpoofReal, speedSpoofDisplay = 50, 16
+local bypassEnabled = false
+local antiFlingEnabled = false
+local spamEnabled = false
+local spamText = "STRXCHATS ON TOP!"
+local spamDelay = 3
+local soundIdInput = ""
+local soundPlaying = false
+local soundVolume = 0.5
 local savedPosition = nil
 local flyBV, flyBG, flyConn
 local noclipConn, antiFlingConn
@@ -103,7 +109,6 @@ local hitboxLoopActive = false
 local botScanAggressive = false
 local botScanDepth = 3
 local activeSlider = nil
-
 local listeningForBind = nil
 local listeningForAimTrigger = false
 local listeningForTpAuraKey = false
@@ -117,13 +122,8 @@ local aimOriginalAutoRotate = true
 local aimCamOffset = Vector3.zero
 local keybindButtons = {}
 local playerConns = {}
-
-local spamEnabled = false
-local spamText = "STRXCHATS ON TOP!"
-local spamDelay = 3
-local soundIdInput = ""
-local soundPlaying = false
-local soundVolume = 0.5
+local hookBusy = false
+local mtHookInstalled = false
 
 local keybinds = {
     fly = {}, aimbot = {}, esp = {}, noclip = {}, infJump = {},
@@ -131,35 +131,9 @@ local keybinds = {
     menu = {key = Enum.KeyCode.Insert, callback = nil},
 }
 
-local hookBusy = false
-local function enableBypass()
-    if bypassEnabled then return end
-    bypassEnabled = true
-    if typeof(hookmetamethod) ~= "function" then return end
-    if typeof(checkcaller) ~= "function" then return end
-    pcall(function()
-        local oldIndex
-        oldIndex = hookmetamethod(game, "__index", function(self, key)
-            if hookBusy then return oldIndex(self, key) end
-            hookBusy = true
-            local ok, res = pcall(oldIndex, self, key)
-            if not ok then hookBusy = false; return nil end
-            if bypassEnabled and not checkcaller() and typeof(self) == "Instance" then
-                if key == "WalkSpeed" and self.ClassName == "Humanoid" then res = 16 end
-                if key == "JumpPower" and self.ClassName == "Humanoid" then res = 50 end
-            end
-            hookBusy = false
-            return res
-        end)
-    end)
-end
-
-local function disableBypass()
-    bypassEnabled = false
-end
-
 local botCache = {}
 local botCacheTime = 0
+
 local BOT_NAME_KEYWORDS = {
     "bot","npc","mob","enemy","zombie","monster","dummy","target",
     "boss","creature","hostile","ai","trainer","guard","soldier",
@@ -168,7 +142,9 @@ local BOT_NAME_KEYWORDS = {
 
 local function nameHasKeyword(nameLower)
     for _, kw in ipairs(BOT_NAME_KEYWORDS) do
-        if nameLower:find("%f[%a]" .. kw .. "%f[%A]") then return true end
+        if nameLower:find("%f[%a]" .. kw .. "%f[%A]") then
+            return true
+        end
     end
     return false
 end
@@ -192,7 +168,9 @@ local function isBotCharacter(model)
     if hum and hum.Health <= 0 then return false end
     local hrp  = model:FindFirstChild("HumanoidRootPart")
     local head = model:FindFirstChild("Head")
-    local torso = model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso") or model:FindFirstChild("LowerTorso")
+    local torso = model:FindFirstChild("Torso")
+        or model:FindFirstChild("UpperTorso")
+        or model:FindFirstChild("LowerTorso")
     local anyPart = model:FindFirstChildWhichIsA("BasePart")
     if hrp then return true end
     if head and torso then return true end
@@ -221,11 +199,13 @@ local function scanInstanceRecursive(obj, out, depth, maxDepth)
 end
 
 local function refreshBotCache()
-    local interval = botScanAggressive and 0.3 or 0.6
+    local interval = botScanAggressive and 0.2 or 0.5
     if tick() - botCacheTime < interval then return end
     botCacheTime = tick()
     local newCache = {}
-    local ok = pcall(function() scanInstanceRecursive(workspace, newCache, 0, botScanDepth) end)
+    local ok = pcall(function()
+        scanInstanceRecursive(workspace, newCache, 0, botScanDepth)
+    end)
     if ok then botCache = newCache end
 end
 
@@ -292,23 +272,6 @@ track(RunService.Stepped:Connect(function()
     end)
 end))
 
-local function toggleAntiFling(state)
-    antiFlingEnabled = state
-    if antiFlingConn then pcall(function() antiFlingConn:Disconnect() end) antiFlingConn = nil end
-    if antiFlingEnabled then
-        antiFlingConn = RunService.Heartbeat:Connect(function()
-            if not isRunning or not antiFlingEnabled then return end
-            pcall(function()
-                local _, hrp = safeCharacter()
-                if hrp then
-                    if hrp.AssemblyLinearVelocity.Magnitude > 100 then hrp.AssemblyLinearVelocity = Vector3.zero end
-                    if hrp.AssemblyAngularVelocity.Magnitude > 50 then hrp.AssemblyAngularVelocity = Vector3.zero end
-                end
-            end)
-        end)
-    end
-end
-
 local function applyJumpPower()
     local char, _, hum = safeCharacter()
     if not hum then return end
@@ -335,37 +298,48 @@ track(RunService.Stepped:Connect(function()
         local _, _, hum = safeCharacter()
         if hum then
             if not hum.UseJumpPower then hum.UseJumpPower = true end
-            if math.abs(hum.JumpPower - jumpPowerValue) > 0.5 then hum.JumpPower = jumpPowerValue end
+            if math.abs(hum.JumpPower - jumpPowerValue) > 0.5 then
+                hum.JumpPower = jumpPowerValue
+            end
         end
     end)
 end))
 
 local function isAimbotTriggered()
     if typeof(aimbotKey) == "EnumItem" then
-        if aimbotKey.EnumType == Enum.KeyCode then return UserInputService:IsKeyDown(aimbotKey)
-        elseif aimbotKey.EnumType == Enum.UserInputType then return UserInputService:IsMouseButtonPressed(aimbotKey) end
+        if aimbotKey.EnumType == Enum.KeyCode then
+            return UserInputService:IsKeyDown(aimbotKey)
+        elseif aimbotKey.EnumType == Enum.UserInputType then
+            return UserInputService:IsMouseButtonPressed(aimbotKey)
+        end
     end
     return false
 end
 
 local visibilityCache = setmetatable({}, {__mode = "k"})
+
 local function isPlayerVisible(targetChar)
     local now = tick()
     local cached = visibilityCache[targetChar]
-    if cached and now - cached.time < 0.15 then return cached.visible end
+    if cached and now - cached.time < 0.15 then
+        return cached.visible
+    end
     local myChar = LocalPlayer.Character
     if not myChar then return false end
     local myHrp = myChar:FindFirstChild("HumanoidRootPart")
     if not myHrp then return false end
-    local targetHrp = targetChar:FindFirstChild("HumanoidRootPart") or targetChar:FindFirstChild("Head") or targetChar:FindFirstChildWhichIsA("BasePart")
+    local targetHrp = targetChar:FindFirstChild("HumanoidRootPart")
+        or targetChar:FindFirstChild("Head")
+        or targetChar:FindFirstChildWhichIsA("BasePart")
     if not targetHrp then return false end
     local origin = myHrp.Position + Vector3.new(0, 1.5, 0)
     local targetPos = targetHrp.Position + Vector3.new(0, 1, 0)
+    local dir = targetPos - origin
     local p = RaycastParams.new()
     p.FilterType = Enum.RaycastFilterType.Exclude
     p.FilterDescendantsInstances = {myChar, targetChar}
     p.IgnoreWater = true
-    local ok, r = pcall(function() return workspace:Raycast(origin, targetPos - origin, p) end)
+    local ok, r = pcall(function() return workspace:Raycast(origin, dir, p) end)
     local visible = ok and (r == nil)
     visibilityCache[targetChar] = {time = now, visible = visible}
     return visible
@@ -388,19 +362,24 @@ local function startFly(isAutoRestart)
     end
     flyEnabled = true
     destroyFlyPhysics()
-    pcall(function() hum.PlatformStand = true; hum.AutoRotate = false end)
     pcall(function()
-        flyBV = Instance.new("BodyVelocity", hrp)
+        hum.PlatformStand = true
+        hum.AutoRotate = false
+    end)
+    pcall(function()
+        flyBV = Instance.new("BodyVelocity")
         flyBV.Name = "STRX_FlyBV"
         flyBV.MaxForce = Vector3.new(1e6, 1e6, 1e6)
         flyBV.Velocity = Vector3.zero
+        flyBV.Parent = hrp
     end)
     pcall(function()
-        flyBG = Instance.new("BodyGyro", hrp)
+        flyBG = Instance.new("BodyGyro")
         flyBG.Name = "STRX_FlyBG"
         flyBG.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
         flyBG.P = 10000
         flyBG.D = 500
+        flyBG.Parent = hrp
     end)
     local lastPos = hrp.Position
     local cframeMode = false
@@ -421,19 +400,27 @@ local function startFly(isAutoRestart)
             local targetVel = dir.Magnitude > 0 and (dir.Unit * flySpeed) or Vector3.zero
             if not cframeMode then
                 if not flyBV or not flyBV.Parent then
-                    flyBV = Instance.new("BodyVelocity", r)
+                    flyBV = Instance.new("BodyVelocity")
+                    flyBV.Name = "STRX_FlyBV"
                     flyBV.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+                    flyBV.Velocity = Vector3.zero
+                    flyBV.Parent = r
                 end
                 if not flyBG or not flyBG.Parent then
-                    flyBG = Instance.new("BodyGyro", r)
+                    flyBG = Instance.new("BodyGyro")
+                    flyBG.Name = "STRX_FlyBG"
                     flyBG.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
                     flyBG.P = 10000
                     flyBG.D = 500
+                    flyBG.Parent = r
                 end
                 flyBV.Velocity = flyBV.Velocity:Lerp(targetVel, math.min(1, dt * 10))
                 if flyBG then
-                    local flat = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z)
-                    if flat.Magnitude > 0.01 then flyBG.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit) end
+                    local look = camCF.LookVector
+                    local flat = Vector3.new(look.X, 0, look.Z)
+                    if flat.Magnitude > 0.01 then
+                        flyBG.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit)
+                    end
                 end
                 if targetVel.Magnitude > 0 then
                     if (r.Position - lastPos).Magnitude < 0.02 then
@@ -443,11 +430,18 @@ local function startFly(isAutoRestart)
                             if flyBV then flyBV:Destroy() flyBV = nil end
                             if flyBG then flyBG:Destroy() flyBG = nil end
                         end
-                    else stuckFrames = 0 end
+                    else
+                        stuckFrames = 0
+                    end
                 end
             else
                 r.AssemblyLinearVelocity = targetVel
                 r.CFrame = r.CFrame + targetVel * dt
+                local look = camCF.LookVector
+                local flat = Vector3.new(look.X, 0, look.Z)
+                if flat.Magnitude > 0.01 then
+                    r.CFrame = CFrame.lookAt(r.Position, r.Position + flat.Unit)
+                end
             end
             lastPos = r.Position
         end)
@@ -459,7 +453,10 @@ local function stopFly()
     destroyFlyPhysics()
     pcall(function()
         local _, _, hum = safeCharacter()
-        if hum then hum.PlatformStand = false; hum.AutoRotate = true end
+        if hum then
+            hum.PlatformStand = false
+            hum.AutoRotate = true
+        end
     end)
     if toggleSync.fly then toggleSync.fly.setVisual(false) end
 end
@@ -473,12 +470,14 @@ local function toggleSpin(state)
         local oldAtt = hrp:FindFirstChild("SpinAtt")
         if oldAtt then oldAtt:Destroy() end
         if spinEnabled then
-            local att = Instance.new("Attachment", hrp)
+            local att = Instance.new("Attachment")
             att.Name = "SpinAtt"
-            spinAV = Instance.new("AngularVelocity", hrp)
+            att.Parent = hrp
+            spinAV = Instance.new("AngularVelocity")
             spinAV.Attachment0 = att
             spinAV.MaxTorque = math.huge
             spinAV.AngularVelocity = Vector3.new(0, spinSpeed, 0)
+            spinAV.Parent = hrp
         end
     end)
 end
@@ -489,14 +488,17 @@ local function toggleNoclip(state)
     if noclipEnabled then
         local last = 0
         noclipConn = RunService.Stepped:Connect(function()
-            if not isRunning or tick() - last < 0.2 then return end
+            if not isRunning then return end
+            if tick() - last < 0.2 then return end
             last = tick()
             pcall(function()
                 local char = LocalPlayer.Character
                 if not char then return end
                 for _, v in ipairs(char:GetDescendants()) do
                     if v:IsA("BasePart") then
-                        if originalCollide[v] == nil then originalCollide[v] = v.CanCollide end
+                        if originalCollide[v] == nil then
+                            originalCollide[v] = v.CanCollide
+                        end
                         v.CanCollide = false
                     end
                 end
@@ -513,6 +515,27 @@ local function toggleNoclip(state)
             end
         end)
         originalCollide = setmetatable({}, {__mode = "k"})
+    end
+end
+
+local function toggleAntiFling(state)
+    antiFlingEnabled = state
+    if antiFlingConn then pcall(function() antiFlingConn:Disconnect() end) antiFlingConn = nil end
+    if antiFlingEnabled then
+        antiFlingConn = RunService.Heartbeat:Connect(function()
+            if not isRunning or not antiFlingEnabled then return end
+            pcall(function()
+                local _, hrp = safeCharacter()
+                if hrp then
+                    if hrp.AssemblyLinearVelocity.Magnitude > 100 then
+                        hrp.AssemblyLinearVelocity = Vector3.zero
+                    end
+                    if hrp.AssemblyAngularVelocity.Magnitude > 50 then
+                        hrp.AssemblyAngularVelocity = Vector3.zero
+                    end
+                end
+            end)
+        end)
     end
 end
 
@@ -557,7 +580,9 @@ local function randomPlayerTp()
         if p ~= LocalPlayer and p.Character then
             local hrp = p.Character:FindFirstChild("HumanoidRootPart")
             local hum = p.Character:FindFirstChildOfClass("Humanoid")
-            if hrp and hum and hum.Health > 0 then table.insert(candidates, hrp) end
+            if hrp and hum and hum.Health > 0 then
+                table.insert(candidates, hrp)
+            end
         end
     end
     if tpAuraBotDetect then
@@ -567,7 +592,9 @@ local function randomPlayerTp()
                 local hrp = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Head") or model:FindFirstChildWhichIsA("BasePart")
                 if hrp then
                     local hum = model:FindFirstChildOfClass("Humanoid")
-                    if not hum or hum.Health > 0 then table.insert(candidates, hrp) end
+                    if not hum or hum.Health > 0 then
+                        table.insert(candidates, hrp)
+                    end
                 end
             end
         end
@@ -576,7 +603,8 @@ local function randomPlayerTp()
     local targetHrp = candidates[math.random(1, #candidates)]
     savedPosition = myHrp.CFrame
     local angle = math.random() * math.pi * 2
-    local offset = Vector3.new(math.cos(angle) * 4, 0, math.sin(angle) * 4)
+    local dist = 4
+    local offset = Vector3.new(math.cos(angle) * dist, 0, math.sin(angle) * dist)
     teleportCharacterTo(CFrame.new(targetHrp.Position + offset + Vector3.new(0, 3, 0)))
 end
 
@@ -607,7 +635,9 @@ local function hitboxLoop()
             for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= LocalPlayer and p.Character then
                     local hum = p.Character:FindFirstChildOfClass("Humanoid")
-                    if not hum or isCharAlive(p.Character, hum) then table.insert(targets, p.Character) end
+                    if not hum or isCharAlive(p.Character, hum) then
+                        table.insert(targets, p.Character)
+                    end
                 end
             end
             if hitboxBotDetect then
@@ -615,7 +645,9 @@ local function hitboxLoop()
                 for _, model in ipairs(botCache) do
                     if model and model.Parent then
                         local hum = model:FindFirstChildOfClass("Humanoid")
-                        if not hum or isCharAlive(model, hum) then table.insert(targets, model) end
+                        if not hum or isCharAlive(model, hum) then
+                            table.insert(targets, model)
+                        end
                     end
                 end
             end
@@ -625,7 +657,9 @@ local function hitboxLoop()
                     if part then
                         if not originalSizes[part] then originalSizes[part] = part.Size end
                         local s = originalSizes[part]
-                        part.Size = Vector3.new(math.max(s.X, hitboxSize), math.max(s.Y, hitboxSize), math.max(s.Z, hitboxSize))
+                        part.Size = Vector3.new(math.max(s.X, hitboxSize),
+                                               math.max(s.Y, hitboxSize),
+                                               math.max(s.Z, hitboxSize))
                     end
                 end
             end
@@ -639,21 +673,71 @@ local function hitboxLoop()
     hitboxLoopActive = false
 end
 
+local function enableBypass()
+    if bypassEnabled then return end
+    bypassEnabled = true
+    if typeof(hookmetamethod) ~= "function" then return end
+    if typeof(checkcaller) ~= "function" then return end
+    pcall(function()
+        if not mtHookInstalled then
+            local origIndex
+            origIndex = hookmetamethod(game, "__index", function(self, key)
+                if hookBusy then return origIndex(self, key) end
+                hookBusy = true
+                local ok, res = pcall(origIndex, self, key)
+                if not ok then hookBusy = false; return nil end
+                if bypassEnabled and not checkcaller() and typeof(self) == "Instance" then
+                    if key == "WalkSpeed" and self.ClassName == "Humanoid" then res = 16 end
+                    if key == "JumpPower" and self.ClassName == "Humanoid" then res = 50 end
+                end
+                hookBusy = false
+                return res
+            end)
+            local origNamecall
+            origNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+                local method = getnamecallmethod()
+                if (method == "Kick" or method == "Kicked") and not checkcaller() then
+                    return nil
+                end
+                return origNamecall(self, ...)
+            end)
+            mtHookInstalled = true
+        end
+    end)
+end
+
+local function disableBypass()
+    bypassEnabled = false
+end
+
+local function getPing()
+    local ok, ping = pcall(function()
+        return math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+    end)
+    return ok and ping or 0
+end
+
 local function cleanup()
     isRunning = false
     _G.STRXcahts = nil
     disableBypass()
+
     if aimWasScriptable then
         aimWasScriptable = false
         pcall(function()
-            if aimOriginalCamType then Camera.CameraType = aimOriginalCamType
-            else Camera.CameraType = Enum.CameraType.Custom end
+            if aimOriginalCamType then
+                Camera.CameraType = aimOriginalCamType
+            else
+                Camera.CameraType = Enum.CameraType.Custom
+            end
         end)
     end
+
     pcall(function()
         local s = SoundService:FindFirstChild("STRX_GlobalSound")
         if s then s:Destroy() end
     end)
+
     for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
     connections = {}
     for _, plist in pairs(playerConns) do
@@ -693,37 +777,44 @@ local function hoverStroke(btn, baseColor, hoverColor)
     s.Color = baseColor
     s.Thickness = 1
     s.Transparency = 0.5
-    btn.MouseEnter:Connect(function() TweenService:Create(s, TweenInfo.new(0.15), {Color = hoverColor, Transparency = 0}):Play() end)
-    btn.MouseLeave:Connect(function() TweenService:Create(s, TweenInfo.new(0.15), {Color = baseColor, Transparency = 0.5}):Play() end)
+    btn.MouseEnter:Connect(function()
+        TweenService:Create(s, TweenInfo.new(0.15), {Color = hoverColor, Transparency = 0}):Play()
+    end)
+    btn.MouseLeave:Connect(function()
+        TweenService:Create(s, TweenInfo.new(0.15), {Color = baseColor, Transparency = 0.5}):Play()
+    end)
     return s
 end
 
 local function newScreenGui(name, order)
-    local g = Instance.new("ScreenGui")
-    g.Name = name
-    g.ResetOnSpawn = false
-    g.IgnoreGuiInset = false
-    g.DisplayOrder = order
-    g.Enabled = true
-    local ok = pcall(function() g.Parent = guiParent end)
-    if not ok or not g.Parent then
-        pcall(function() g.Parent = LocalPlayer:WaitForChild("PlayerGui", 5) end)
-    end
-    if not g.Parent then
-        pcall(function() g.Parent = game:GetService("CoreGui") end)
+    local g
+    pcall(function()
+        g = Instance.new("ScreenGui")
+        g.Name = name
+        g.Parent = guiParent
+        g.ResetOnSpawn = false
+        g.IgnoreGuiInset = false
+        g.DisplayOrder = order
+        g.Enabled = true
+    end)
+    if not g then
+        g = Instance.new("ScreenGui")
+        g.Name = name
+        g.ResetOnSpawn = false
+        g.Parent = guiParent
+        g.Enabled = true
     end
     return g
 end
 
-local ScreenGui   = newScreenGui("STRXcahtsMenu", 50)
-local ESPGui      = newScreenGui("STRX_ESPGui", 6)
+local ScreenGui    = newScreenGui("STRXcahtsMenu", 50)
+local ESPGui       = newScreenGui("STRX_ESPGui", 6)
 ESPGui.IgnoreGuiInset = true
-local FOVGui      = newScreenGui("STRX_FOVGui", 5)
+local FOVGui       = newScreenGui("STRX_FOVGui", 5)
 FOVGui.IgnoreGuiInset = true
-local WatermarkGui= newScreenGui("STRX_Watermark", 100)
-local CrosshairGui= newScreenGui("STRX_Crosshair", 99)
+local WatermarkGui = newScreenGui("STRX_Watermark", 100)
+local CrosshairGui = newScreenGui("STRX_Crosshair", 99)
 CrosshairGui.IgnoreGuiInset = true
-ScreenGui.Enabled = true
 
 local FOVFrame = Instance.new("Frame", FOVGui)
 FOVFrame.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -746,7 +837,6 @@ for i = 1, 4 do
     local f = Instance.new("Frame", CrosshairFrame)
     f.BackgroundColor3 = crosshairColor
     f.BorderSizePixel = 0
-    f.Visible = true
     chLines[i] = f
 end
 
@@ -765,29 +855,40 @@ local function updateCrosshair()
 end
 updateCrosshair()
 
-local wmFrame = Instance.new("Frame", WatermarkGui)
-wmFrame.Size = UDim2.new(0, 200, 0, 30)
-wmFrame.Position = UDim2.new(1, -210, 0, 10)
-wmFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
-wmFrame.BackgroundTransparency = 0.25
-wmFrame.BorderSizePixel = 0
-addCorner(wmFrame, 8)
-local wmStroke = addStroke(wmFrame, Color3.fromRGB(255, 140, 0), 1, 0)
+local wmBtn = Instance.new("TextButton", WatermarkGui)
+wmBtn.Size = UDim2.new(0, 180, 0, 30)
+wmBtn.Position = UDim2.new(1, -190, 0, 10)
+wmBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+wmBtn.BackgroundTransparency = 0.25
+wmBtn.BorderSizePixel = 0
+wmBtn.Text = ""
+wmBtn.AutoButtonColor = false
+wmBtn.ZIndex = 2
+addCorner(wmBtn, 8)
+local wmStroke = addStroke(wmBtn, Color3.fromRGB(255, 140, 0), 1, 0)
 
-local wmLayout = Instance.new("UIListLayout", wmFrame)
-wmLayout.FillDirection = Enum.FillDirection.Horizontal
-wmLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-wmLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-wmLayout.Padding = UDim.new(0, 4)
+local wmTitle = Instance.new("TextLabel", wmBtn)
+wmTitle.Size = UDim2.new(0, 80, 1, 0)
+wmTitle.Position = UDim2.new(0, 8, 0, 0)
+wmTitle.BackgroundTransparency = 1
+wmTitle.Text = "STRXCHATS"
+wmTitle.TextColor3 = Color3.new(1,1,1)
+wmTitle.Font = Enum.Font.GothamBold
+wmTitle.TextSize = 12
+wmTitle.TextXAlignment = Enum.TextXAlignment.Left
+wmTitle.ZIndex = 3
 
-local wmBtn = Instance.new("TextButton", wmFrame)
-wmBtn.Size = UDim2.new(1, 0, 1, 0)
-wmBtn.BackgroundTransparency = 1
-wmBtn.Text = "STRXCHATS  |  -- FPS  -- MS"
-wmBtn.TextColor3 = Color3.new(1,1,1)
-wmBtn.Font = Enum.Font.GothamBold
-wmBtn.TextSize = 12
-wmBtn.ZIndex = 5
+local wmFPS = Instance.new("TextLabel", wmBtn)
+wmFPS.Size = UDim2.new(0, 80, 1, 0)
+wmFPS.Position = UDim2.new(1, -88, 0, 0)
+wmFPS.BackgroundTransparency = 1
+wmFPS.Text = "| 60 FPS"
+wmFPS.TextColor3 = Color3.new(1,1,1)
+wmFPS.Font = Enum.Font.GothamBold
+wmFPS.TextSize = 11
+wmFPS.TextXAlignment = Enum.TextXAlignment.Right
+wmFPS.ZIndex = 3
+
 wmBtn.MouseButton1Click:Connect(function()
     ScreenGui.Enabled = not ScreenGui.Enabled
 end)
@@ -796,8 +897,8 @@ local function updateWmSize()
     local w = 90
     if showFps then w = w + 55 end
     if showPing then w = w + 55 end
-    wmFrame.Size = UDim2.new(0, w, 0, 30)
-    wmFrame.Position = UDim2.new(1, -w - 10, 0, 10)
+    wmBtn.Size = UDim2.new(0, w, 0, 30)
+    wmBtn.Position = UDim2.new(1, -w - 10, 0, 10)
 end
 updateWmSize()
 
@@ -868,7 +969,9 @@ local function createESPForModel(char)
 
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then
-        table.insert(espConns, hum.Died:Connect(function() removeESPForModel(char) end))
+        table.insert(espConns, hum.Died:Connect(function()
+            removeESPForModel(char)
+        end))
     end
     table.insert(espConns, char.AncestryChanged:Connect(function(_, parent)
         if not parent then removeESPForModel(char) end
@@ -902,6 +1005,9 @@ local function updateHighlightFor(char)
             h.Adornee = char
             h.Parent = ESPGui
             data.highlight = h
+        else
+            data.highlight.FillColor = espChamsColor
+            data.highlight.OutlineColor = espChamsColor
         end
     else
         if data.highlight then
@@ -937,6 +1043,7 @@ local function getAimbotTarget()
         return cachedAimbotTarget, cachedAimbotHum, cachedAimbotPos
     end
     lastAimbotScan = tick()
+
     local closest, shortest = nil, math.huge
     local closestHum, closestPos = nil, Vector3.zero
     local center = Camera.ViewportSize / 2
@@ -944,6 +1051,7 @@ local function getAimbotTarget()
     if not myChar then return nil end
     local myHrp = myChar:FindFirstChild("HumanoidRootPart")
     if not myHrp then return nil end
+
     local allChars = {}
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character then
@@ -958,10 +1066,14 @@ local function getAimbotTarget()
             if model and model.Parent then table.insert(allChars, model) end
         end
     end
+
     for _, char in ipairs(allChars) do
         local hum = char:FindFirstChildOfClass("Humanoid")
         if isCharAlive(char, hum) then
-            local targetPart = char:FindFirstChild(aimbotAimPart) or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head") or char:FindFirstChildWhichIsA("BasePart")
+            local targetPart = char:FindFirstChild(aimbotAimPart)
+                or char:FindFirstChild("HumanoidRootPart")
+                or char:FindFirstChild("Head")
+                or char:FindFirstChildWhichIsA("BasePart")
             if targetPart then
                 local aimPos = targetPart.Position
                 if aimPrediction and targetPart.AssemblyLinearVelocity.Magnitude > 5 then
@@ -969,6 +1081,7 @@ local function getAimbotTarget()
                     local travelTime = dist / 3000
                     aimPos = aimPos + (targetPart.AssemblyLinearVelocity * travelTime * aimPredictionMultiplier)
                 end
+
                 local sp, onScreen = Camera:WorldToViewportPoint(aimPos)
                 if onScreen then
                     local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
@@ -991,19 +1104,12 @@ local function getAimbotTarget()
             end
         end
     end
+
     cachedAimbotTarget = closest
     cachedAimbotHum = closestHum
     cachedAimbotPos = closestPos
     return closest, closestHum, closestPos
 end
-
-local function getPing()
-    local ok, ping = pcall(function()
-        return math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
-    end)
-    return ok and ping or 0
-end
-
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Name = "MainFrame"
 MainFrame.Size = UDim2.new(0, 700, 0, 560)
@@ -1115,7 +1221,9 @@ closeBtn.TextSize = 16
 closeBtn.AutoButtonColor = false
 closeBtn.ZIndex = 4
 addCorner(closeBtn, 8)
-closeBtn.MouseButton1Click:Connect(function() ScreenGui.Enabled = false end)
+closeBtn.MouseButton1Click:Connect(function()
+    ScreenGui.Enabled = false
+end)
 
 local tabNames = {"Player","ESP","Aimbot","Araclar","Ayarlar"}
 local tabs = {}
@@ -1233,7 +1341,6 @@ local function makeToggle(parent, text, y, callback, keybindId, syncId)
         pcall(callback, on)
     end
 
-    onBtn.MouseButton1
     onBtn.MouseButton1Click:Connect(doToggle)
     if keybindId and keybinds[keybindId] then keybinds[keybindId].callback = doToggle end
     if syncId then toggleSync[syncId] = {setVisual = setVisual, getState = function() return on end} end
@@ -1338,6 +1445,7 @@ local function makeSlider(parent, labelText, minV, maxV, default, y, onChanged)
             upd(i.Position.X)
         end
     end
+
     barBg.InputBegan:Connect(beginDrag)
     fill.InputBegan:Connect(beginDrag)
     knob.InputBegan:Connect(beginDrag)
@@ -1408,8 +1516,7 @@ local function makePage()
     p.BorderSizePixel = 0
     p.ScrollBarThickness = 4
     p.ScrollBarImageColor3 = Color3.fromRGB(255, 140, 0)
-    p.CanvasSize = UDim2.new(0, 0, 0, 1000)
-    p.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    p.CanvasSize = UDim2.new(0, 0, 0, 1100)
     p.ScrollingDirection = Enum.ScrollingDirection.Y
     p.Visible = false
     p.ZIndex = 2
@@ -1427,24 +1534,28 @@ makeToggle(playerPage, "Fly (WASD)", 28, function(s) if s then startFly(false) e
 makeSlider(playerPage, "Fly Hizi", 1, 500, flySpeed, 70, function(v) flySpeed = v end)
 makeToggle(playerPage, "WalkSpeed Override", 134, function(s) walkSpeedEnabled = s; applyWalkSpeed() end, "walkSpeed")
 makeSlider(playerPage, "WalkSpeed", 1, 500, walkSpeedValue, 176, function(v) walkSpeedValue = v; applyWalkSpeed() end)
-makeToggle(playerPage, "Speed Spoofer", 240, function(s) speedSpoofEnabled = s end)
-makeToggle(playerPage, "Anti-Fling", 282, function(s) toggleAntiFling(s) end)
-makeToggle(playerPage, "JumpPower Override", 324, function(s) jumpPowerEnabled = s; applyJumpPower() end)
-makeSlider(playerPage, "JumpPower", 10, 500, jumpPowerValue, 366, function(v) jumpPowerValue = v; if jumpPowerEnabled then applyJumpPower() end end)
-makeToggle(playerPage, "Noclip", 430, function(s) toggleNoclip(s) end, "noclip")
-makeToggle(playerPage, "Sonsuz Ziplama", 472, function(s) infiniteJumpEnabled = s end, "infJump")
-makeToggle(playerPage, "Spin", 514, function(s) toggleSpin(s) end, "spin")
-makeSlider(playerPage, "Spin Hizi", 1, 200, spinSpeed, 556, function(v) spinSpeed = v; if spinAV then spinAV.AngularVelocity = Vector3.new(0,v,0) end end)
-makeSectionLabel(playerPage, "Kamera & Ekstra", 620)
-makeToggle(playerPage, "Kamera FOV Ac/Kapat", 644, function(s)
+makeToggle(playerPage, "JumpPower Override", 240, function(s) jumpPowerEnabled = s; applyJumpPower() end)
+makeSlider(playerPage, "JumpPower", 10, 500, jumpPowerValue, 282, function(v) jumpPowerValue = v; if jumpPowerEnabled then applyJumpPower() end end)
+makeToggle(playerPage, "Noclip", 346, function(s) toggleNoclip(s) end, "noclip")
+makeToggle(playerPage, "Sonsuz Ziplama", 388, function(s) infiniteJumpEnabled = s end, "infJump")
+makeToggle(playerPage, "Spin", 430, function(s) toggleSpin(s) end, "spin")
+makeSlider(playerPage, "Spin Hizi", 1, 200, spinSpeed, 472, function(v) spinSpeed = v; if spinAV then spinAV.AngularVelocity = Vector3.new(0,v,0) end end)
+makeSectionLabel(playerPage, "Guvenlik", 536)
+makeToggle(playerPage, "Speed Spoofer", 560, function(s)
+    speedSpoofEnabled = s
+    if s then enableBypass() else disableBypass() end
+end)
+makeToggle(playerPage, "Anti-Fling", 602, function(s) toggleAntiFling(s) end)
+makeSectionLabel(playerPage, "Kamera & Ekstra", 656)
+makeToggle(playerPage, "Kamera FOV Ac/Kapat", 680, function(s)
     camFovEnabled = s
     if not s then pcall(function() Camera.FieldOfView = 70 end) end
 end)
-makeSlider(playerPage, "Kamera FOV Degeri", 50, 120, camFovValue, 686, function(v)
+makeSlider(playerPage, "Kamera FOV Degeri", 50, 120, camFovValue, 722, function(v)
     camFovValue = v
     if camFovEnabled then pcall(function() Camera.FieldOfView = v end) end
 end)
-makeToggle(playerPage, "Anti-AFK", 750, function(s) antiAfkEnabled = s end)
+makeToggle(playerPage, "Anti-AFK", 786, function(s) antiAfkEnabled = s end)
 
 makeSectionLabel(espPage, "Gorunum", 4)
 makeToggle(espPage, "ESP Ac/Kapat", 28, function(s)
@@ -1478,7 +1589,9 @@ makeToggle(espPage, "Botlari Algila (ESP)", 326, function(s)
     espBotDetect = s
     if not s then
         for model, _ in pairs(espData) do
-            if not Players:GetPlayerFromCharacter(model) then removeESPForModel(model) end
+            if not Players:GetPlayerFromCharacter(model) then
+                removeESPForModel(model)
+            end
         end
     elseif espEnabled then
         refreshBotCache()
@@ -1544,6 +1657,7 @@ makeSlider(aimbotPage, "Orbit Yaricapi", 1, 20, orbitRadius, 654, function(v) or
 makeSectionLabel(aimbotPage, "Crosshair (Nisangah)", 718)
 makeToggle(aimbotPage, "Ozel Nisangah Ac/Kapat", 742, function(s) crosshairEnabled = s; updateCrosshair() end)
 makeSlider(aimbotPage, "Nisangah Boyutu", 4, 30, crosshairSize, 784, function(v) crosshairSize = v; updateCrosshair() end)
+makeToggle(aimbotPage, "FOV Cizgisini Goster", 848, function(s) showFOVCircle = s end)
 
 makeSectionLabel(utilityPage, "Isinlanma", 4)
 local tpAuraKbBtn = makeKeybindAction(utilityPage, "TP Aura (Rastgele)", 28)
@@ -1553,7 +1667,6 @@ lookTpKbBtn.MouseButton1Click:Connect(function() listeningForLookTpKey = true; l
 makeButton(utilityPage, "Geri Don (Son Isinlanmadan)", 8, 120, 320, 38, Color3.fromRGB(200,100,60), goBack)
 makeToggle(utilityPage, "Tikla-Isinlan (Mouse/Touch)", 170, function(s) clickTpEnabled = s end, "clickTp")
 makeToggle(utilityPage, "Botlari Algila (TP Aura)", 212, function(s) tpAuraBotDetect = s end)
-
 makeSectionLabel(utilityPage, "Eglence & Ekstra", 266)
 makeToggle(utilityPage, "Chat Spammer", 290, function(s) spamEnabled = s end)
 makeTextBox(utilityPage, "Spam Mesaji...", 332, function(t) spamText = t end)
@@ -1579,17 +1692,15 @@ makeToggle(utilityPage, "Global Sound Player", 438, function(s)
 end)
 makeTextBox(utilityPage, "Sound ID (Orn: 123456)", 480, function(t)
     soundIdInput = t
-    if soundPlaying then
+    if soundPlaying and t ~= "" then
         local existing = SoundService:FindFirstChild("STRX_GlobalSound")
         if existing then existing:Destroy() end
-        if t ~= "" then
-            local snd = Instance.new("Sound", SoundService)
-            snd.Name = "STRX_GlobalSound"
-            snd.SoundId = "rbxassetid://" .. t
-            snd.Volume = soundVolume
-            snd.Looped = true
-            snd:Play()
-        end
+        local snd = Instance.new("Sound", SoundService)
+        snd.Name = "STRX_GlobalSound"
+        snd.SoundId = "rbxassetid://" .. t
+        snd.Volume = soundVolume
+        snd.Looped = true
+        snd:Play()
     end
 end)
 makeSlider(utilityPage, "Ses Seviyesi x100", 1, 100, math.floor(soundVolume * 100), 522, function(v)
@@ -1606,13 +1717,26 @@ makeToggle(settingsPage, "Metatable Bypass / Hook", 154, function(s) if s then e
 
 local menuKeyRow = makeKeybindAction(settingsPage, "Menu Ac/Kapat Tusu", 196)
 menuKeyRow.Text = keybinds.menu.key and keybinds.menu.key.Name or "Insert"
-menuKeyRow.MouseButton1Click:Connect(function() listeningForBind = "menu"; menuKeyRow.Text = "..." end)
-
-makeButton(settingsPage, "Scripti Kaldir (Unload)", 8, 248, 320, 38, Color3.fromRGB(200, 55, 55), function() cleanup() end)
+menuKeyRow.MouseButton1Click:Connect(function()
+    listeningForBind = "menu"
+    menuKeyRow.Text = "..."
+end)
+makeButton(settingsPage, "Scripti Kaldir (Unload)", 8, 248, 320, 38, Color3.fromRGB(200, 55, 55), function()
+    cleanup()
+end)
+local creditLbl = Instance.new("TextLabel", settingsPage)
+creditLbl.Size = UDim2.new(0, 320, 0, 40)
+creditLbl.Position = UDim2.new(0, 8, 0, 300)
+creditLbl.BackgroundTransparency = 1
+creditLbl.Text = "STRXCHATS v37.0\nInsert = menu, Watermark tikla = ac/kapa"
+creditLbl.TextColor3 = Color3.fromRGB(140, 140, 150)
+creditLbl.Font = Enum.Font.Gotham
+creditLbl.TextSize = 11
+creditLbl.TextWrapped = true
+creditLbl.ZIndex = 2
 
 local pages = {Player=playerPage, ESP=espPage, Aimbot=aimbotPage, Araclar=utilityPage, Ayarlar=settingsPage}
 local activeTab = "Player"
-
 local function showPage(name)
     activeTab = name
     for n, p in pairs(pages) do p.Visible = (n == name) end
@@ -1630,7 +1754,6 @@ local function showPage(name)
         end
     end
 end
-
 for name, btn in pairs(tabs) do
     btn.MouseButton1Click:Connect(function() showPage(name) end)
 end
@@ -1641,7 +1764,6 @@ track(UserInputService.InputChanged:Connect(function(i)
         pcall(activeSlider, i.Position.X)
     end
 end))
-
 track(UserInputService.InputEnded:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
         activeSlider = nil
@@ -1811,11 +1933,10 @@ track(RunService.RenderStepped:Connect(function()
         fpsCounter = 0
         fpsTimer = tick()
         local ping = showPing and getPing() or 0
-        local parts = {}
-        if showFps then table.insert(parts, cur .. " FPS") end
-        if showPing then table.insert(parts, ping .. " MS") end
-        local txt = #parts > 0 and ("STRXCHATS  |  " .. table.concat(parts, "  |  ")) or "STRXCHATS"
-        wmBtn.Text = txt
+        local wmParts = {}
+        if showFps then table.insert(wmParts, cur .. " FPS") end
+        if showPing then table.insert(wmParts, ping .. " MS") end
+        wmFPS.Text = #wmParts > 0 and ("| " .. table.concat(wmParts, " | ")) or ""
         fpsLbl.Text = (showFps and (cur .. " FPS ") or "") .. (showPing and ("| " .. ping .. " MS") or "")
     end
 end))
@@ -1846,6 +1967,8 @@ task.spawn(function()
                 titleAccent.BackgroundColor3 = col
                 bgLogo.TextColor3 = col
                 bgLogo.TextTransparency = 0.85
+                wmTitle.TextColor3 = col
+                wmFPS.TextColor3 = col
                 wmStroke.Color = col
                 FOVStroke.Color = col
                 mainStroke.Color = col
@@ -1855,6 +1978,8 @@ task.spawn(function()
                 titleAccent.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
                 bgLogo.TextColor3 = Color3.new(1,1,1)
                 bgLogo.TextTransparency = 0.9
+                wmTitle.TextColor3 = Color3.new(1,1,1)
+                wmFPS.TextColor3 = Color3.new(1,1,1)
                 wmStroke.Color = Color3.fromRGB(255, 140, 0)
                 FOVStroke.Color = Color3.fromRGB(0, 255, 100)
                 mainStroke.Color = Color3.fromRGB(255, 140, 0)
@@ -2030,6 +2155,7 @@ RunService:BindToRenderStep("STRX_Aimbot_Move", Enum.RenderPriority.Camera.Value
 
         local keyHeld = aimbotEnabled and isAimbotTriggered()
         local hasTarget = aimbotTarget and aimbotTarget.Parent
+
         if hasTarget and aimbotTargetHum and not isCharAlive(aimbotTarget.Parent, aimbotTargetHum) then
             hasTarget = false
             aimbotTarget = nil
@@ -2080,3 +2206,5 @@ task.spawn(function()
         pcall(captureOriginal, startChar)
     end
 end)
+
+print("STRXcahts v37.0 | tam surum yuklendi")
